@@ -1,0 +1,9 @@
+# Runs the same linter as `make lint` and CI, from the locked environment (no separate hook pin to drift).
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check
+        language: system
+        types: [python]

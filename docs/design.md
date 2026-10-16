@@ -1,0 +1,435 @@
+# Design document: complaint-router
+
+Routing consumer financial complaints to the right product queue, with a system that keeps learning.
+
+| | |
+|---|---|
+| Author | Zakhar Staryk |
+| Status | Lab 1 draft (design only, no pipeline yet) |
+| Last revised | 2026-10-12 |
+| Later revisions | Lab 2: 5.2, 5.4, 6.1, 7.2 · Lab 3: 5.3, 6.2, 6.7 · Lab 4: 6.1 (deployment), 6.3, 6.6, 7.3 · Lab 5: 6.8, 7.4 |
+
+Statements marked **Assumption:** are decisions taken without evidence yet. Each one names the lab that will confirm or replace it.
+
+---
+
+## 1 Overview
+
+A complaint intake desk gets about ten thousand free-text consumer complaints a day about financial products (mortgages, credit cards, credit reports, debt collection and more). Each one has to reach the team that owns that product, and a complaint that lands in the wrong queue waits days before someone reroutes it. complaint-router reads the complaint text when it arrives and predicts the product queue with a confidence score. Complaints it is confident about are routed automatically; the rest go to a human triage queue with the prediction as a suggestion. The goal is fewer misrouted complaints and less manual triage, from a model that is retrained as the product mix and complaint vocabulary change.
+
+## 2 Motivation
+
+**Who consumes the predictions.** The intake desk's ticketing queue (the *Triage desk* in the diagrams) calls the service once per new complaint and uses the answer to set the ticket's queue. Triage agents see the prediction and its confidence on every complaint that is not auto-routed.
+
+**How often.** Continuously during intake hours, one request per complaint. **Assumption:** about 10,000 complaints a day with peaks of 10× the average rate. This is the order of magnitude of recent CFPB volume, which is the data this project uses (section 5.2).
+
+**What happens when they are wrong.** A misrouted complaint goes to a team that does not own it. That team has to notice, reassign it, and the clock on the regulatory response window (15 days for a first response under CFPB's process) keeps running. Systematic errors hurt more than random ones. If the model starts sending, say, new "buy now, pay later" complaints to the credit-card team, a whole category gets slow and nobody notices until labels come back.
+
+**Why a system and not a notebook.** Three things change over time and a notebook cannot follow them:
+
+- **The label space.** CFPB revised its product taxonomy in April 2017, merging and renaming categories. New products (virtual currency, BNPL) appear as complaints before they have their own category.
+- **The class mix.** Credit-reporting complaints grew from a minority to the large majority of volume in recent years. A model trained on old data has the wrong priors.
+- **The vocabulary.** New scams, new company names, new regulations.
+
+The system therefore needs scheduled ingestion, versioned data, tracked retraining, a promotion rule and monitoring that works before labels arrive. Those are what Labs 2 to 5 build.
+
+## 3 Success metrics
+
+Three layers, kept apart. Each target is either backed by a number or marked as an assumption.
+
+| Layer | Metric | Target | Type | Status |
+|---|---|---|---|---|
+| Business | **Misrouting rate**: share of complaints whose queue is changed by a human after routing | ≤ 8% (from an assumed 15% with manual keyword triage) | Optimizing (business) | **Assumption:** there is no real desk to measure. In this project it is emulated as the share of predictions that disagree with the delayed label (section 5.2). |
+| Business | **Auto-route coverage**: share of complaints routed with no human touch | ≥ 60% | Satisficing | **Assumption**, derived from the confidence threshold in 5.4. |
+| Model | **Macro-F1** over the product classes on the most recent held-out month | ≥ 0.80, and ≥ baseline + 0.10 | Optimizing (model) | Assumption until the Lab 2 baseline sets the real reference point. |
+| Model | **Precision on the auto-routed slice** (confidence ≥ threshold) | ≥ 0.95 | Satisficing | Sets the threshold. The threshold then determines coverage. |
+| System | **p95 latency** of `POST /predict`, measured at the service | ≤ 300 ms | Satisficing | **Assumption:** no consumer SLA exists yet, so 300 ms was picked so routing feels instant to a triage agent. |
+| System | **Availability** during intake hours (08:00–20:00 local) | ≥ 99.5% monthly | Satisficing | Assumption. The fallback in section 4 keeps intake working when the service is down. |
+| System | **Data freshness**: age of the newest ingested complaint | ≤ 3 days | Satisficing | The CFPB export is refreshed daily (observed 2026-10-12: `last-modified` that same day). |
+
+The optimizing metric for model selection is macro-F1, chosen over accuracy because the classes are heavily imbalanced. Every other row is a constraint that a candidate model must meet before macro-F1 is compared.
+
+## 4 Requirements and constraints
+
+### Functional requirements
+
+| # | Requirement |
+|---|---|
+| F1 | **Input.** `POST /predict` with JSON `{complaint_id, narrative, date_received, submitted_via, state, company}`. Only `complaint_id` and `narrative` are required. |
+| F2 | **Output.** `{complaint_id, product, confidence, top3: [{product, p}], route: "auto" \| "manual", model_version}`. |
+| F3 | **Caller.** Only the Triage desk (the ticketing integration) calls the service, using an API key. There are no end-user calls. |
+| F4 | `route = "auto"` iff `confidence ≥ threshold`. The threshold is stored with the model version in the registry, not in code. |
+| F5 | Every request and response is logged (text hashed, see 6.5) with `model_version`, so that a prediction can be joined to its label later. |
+| F6 | A scheduled pipeline ingests each new CFPB batch, validates it, versions it and makes it available for training. |
+| F7 | A retraining run can be triggered on a schedule (monthly) or by a drift alert. It produces a registered candidate, which is never auto-promoted. |
+| F8 | `GET /health` reports liveness, plus readiness with the loaded `model_version`. Readiness fails if no model is loaded. |
+
+### Non-functional requirements
+
+One row per category, each with a number or an explicit assumption.
+
+| Category | Requirement |
+|---|---|
+| Freshness | New CFPB data is ingested daily and is ≤ 3 days old when used. Labels are joined to predictions 15 days after prediction (emulated delay, 5.2). The serving model is trained on data no older than 35 days at promotion time. |
+| Latency and throughput | p95 ≤ 300 ms and p99 ≤ 800 ms for `POST /predict` with narratives up to 10,000 characters. Sustains 20 req/s on one CPU replica, against an assumed peak need of about 1.2 req/s (10k/day × 10 ÷ 86,400). |
+| Availability and fallback | ≥ 99.5% during intake hours. **Fallback:** if the service errors or exceeds 2 s, the Triage desk sends the complaint to the manual queue, so routing is never blocked. If the model fails to load, readiness fails and the previous `@champion` version keeps serving. |
+| Reproducibility | Any registered model can be rebuilt from `(git commit, DVC data version, params)` with one command, and these three are logged on every MLflow run. Environment pinned by `uv.lock`; container images tagged with the commit (Lab 4). |
+| Adaptability | Monthly scheduled retraining, plus retraining triggered by drift alerts. Unknown product labels in a new batch are mapped through a versioned taxonomy table. An unmapped label fails the quality gate instead of silently becoming a new class. |
+| Observability without ground truth | For the 15 days before labels arrive, the system monitors input drift (text length, OOV-token rate, `submitted_via` mix), prediction drift (class distribution PSI against the reference month) and confidence drift (mean max-probability, share routed `auto`). Thresholds are in 6.6. Accuracy is measured only once labels arrive. |
+| Cost and resource ceilings | Local: the whole stack fits in Minikube with 4 GB RAM and 2 CPUs. The model is ≤ 200 MB on disk and ≤ 1 GB RAM per replica, and training takes ≤ 30 min on a laptop CPU. Cloud equivalent ≤ $800/month (estimate in 6.7). |
+
+**Conflict between requirements.** Freshness and reproducibility pull against each other. Training on the newest data means training on batches that were ingested hours ago, before the same-day re-export from CFPB has settled (CFPB re-publishes and amends rows). Reproducibility wins: training reads only DVC-tagged snapshots, which costs up to one day of freshness. That is why the freshness row says ≤ 3 days and not "same day".
+
+### In scope
+
+- Product-level routing (one label per complaint) from the narrative plus intake-form fields.
+- Batch ingestion of the public CFPB export, data versioning, quality gate, training, registry, online serving, monitoring and drift alerts.
+- An LLM component (Lab 3) that gives triage agents a short rationale for the routing, citing retrieved policy passages.
+- An agent (Lab 5) that can run the operational playbook: check drift, compare candidate with champion, draft a promotion note.
+
+### Out of scope
+
+- Issue and sub-issue level routing (rejected in 5.1, possibly later).
+- Real integration with a ticketing product. The Triage desk is simulated by a replay script.
+- Drafting replies to consumers, and any decision on the merit of a complaint.
+- Languages other than English, and complaints without a narrative (they go straight to manual triage).
+- Production cloud deployment. Cloud services are named and costed but not run.
+
+## 5 Methodology
+
+### 5.1 Problem statement
+
+**Framing:** single-label multiclass text classification. The input is the complaint narrative (plus optional form fields), and the output is one of the consolidated product classes:
+
+1. Credit reporting
+2. Debt collection
+3. Credit card
+4. Checking or savings account
+5. Mortgage
+6. Money transfer and virtual currency
+7. Vehicle loan or lease
+8. Student loan
+9. Payday, title and personal loan
+10. Prepaid card
+
+"Consolidated" means the pre-2017 and post-2017 CFPB product names are mapped onto one stable set by a versioned taxonomy table (`taxonomy_map.csv`, Lab 2).
+
+**Rejected framing: issue-level routing.** CFPB's `Issue` field has many dozens of values, several of them shared across products and renamed between taxonomy versions. A flat classifier would be sparse in most classes and invalidated by every taxonomy change, and a hierarchical one doubles the evaluation surface before the simple system works. Product is what decides the owning team, so it is the decision that matters. Issue stays as a possible Lab 5+ extension.
+
+### 5.2 Data
+
+**Source.** The CFPB [Consumer Complaint Database](https://www.consumerfinance.gov/data-research/consumer-complaints/), a full export at `https://files.consumerfinance.gov/ccdb/complaints.csv.zip`. It is public domain and re-published daily. Observed on 2026-10-12: 353 MB zipped, `last-modified` the same day.
+
+**Arrival pattern.** The whole history is re-exported daily, and rows can be amended after first publication. The ingestion task therefore reads the export and keeps rows whose `date_received` falls in the target interval, which makes the run idempotent per interval. Lab 2 ingests one calendar month per run, which lets it replay "the next month".
+
+**Fields and serving-time availability.**
+
+| Field | Training | Serving | Note |
+|---|---|---|---|
+| `Consumer complaint narrative` | yes | yes (request body) | The main feature. Published only with consumer consent, from 2015-03-19 onwards. |
+| `Date received` | yes | yes | Used for the time split and for seasonality checks, not as a model feature. |
+| `Submitted via` | yes | yes | Web, phone, referral and so on. |
+| `State` | yes | yes | |
+| `Company` | yes | yes, but raw | CFPB normalizes company names and the intake form gets free text. This is a training/serving skew risk, see 5.3. |
+| `Product`, `Sub-product` | **label** | no | Arrives with the label (below). |
+| `Issue`, `Sub-issue` | no | no | Out of scope (5.1). |
+| `Company response to consumer`, `Timely response?`, `Company public response`, `Date sent to company`, `Consumer disputed?` | **excluded** | no | These are produced after routing. Using them would be target leakage. |
+| `ZIP code`, `Tags`, `Complaint ID` | ID only | yes | `Complaint ID` is the join key between prediction and label. |
+
+**Labels and their delay.** In the raw data, `Product` is chosen by the consumer on the form, so it exists at submission. This project emulates a desk where complaints arrive as free text (e-mail, phone transcripts) and the product is confirmed only when the owning team accepts the ticket. **Assumption:** the label arrives 15 days after the prediction, matching CFPB's 15-day company response window. The label release job joins `Product` to the prediction log only for complaints with `date_received ≤ today − 15 days`. Lab 4 monitors those 15 days without ground truth.
+
+**Known label noise.** Consumers pick the wrong product sometimes. **Assumption:** about 5–10% noise. Lab 2 measures it by hand-labeling a sample of 200 and reports it next to the baseline.
+
+**Checklist justification.**
+
+| Checklist item | Status | Justification |
+|---|---|---|
+| A time axis | ✅ | `Date received` is daily, from Dec 2011 to today. New batches arrive daily, so Lab 2 can ingest "the next month" and Lab 4 can replay months with real drift (taxonomy change in 2017, credit-reporting surge in recent years) instead of synthetic drift. |
+| Enough history to hold out a period | ✅ | Narratives cover 2015-03 to today, about 11.5 years. Plan: train on a rolling 24 months up to 2025-12, validate on 2026-01 to 2026-03, test on 2026-04 to 2026-06, and keep 2026-07 onwards as unseen "future" batches for Lab 2 replay and Lab 4 drift. Exact row counts are an **assumption** (millions per year with narratives) until the Lab 2 profile. |
+| Labels with a known arrival delay | ✅ (emulated) | 15 days, as above. The delay is a design assumption on top of real data, stated as such. |
+| A text surface or a documented corpus | ✅ | The narratives are the data itself. For Lab 3 retrieval the corpus is (a) *Ask CFPB* consumer explainer articles (consumerfinance.gov/ask-cfpb) and (b) the eCFR text of the regulations that govern the products: Reg B (12 CFR 1002), Reg E (1005), Reg F (1006), Reg V (1022), Reg X (1024) and Reg Z (1026). Both are public. |
+
+**Formats.** Raw layer: the CSV exactly as downloaded, zipped, one snapshot per ingestion, never edited, so it can be re-parsed. Clean and features layers: Parquet partitioned by `month=YYYY-MM` (columnar, typed and about 5–10× smaller than CSV). Serving-side prediction and label logs: PostgreSQL tables, because they are appended one row at a time and joined by `complaint_id`.
+
+### 5.3 Techniques
+
+**Baseline 0 (trivial).** Always predict the most frequent class (credit reporting). Its macro-F1 is the floor.
+
+**Baseline 1 (rule).** A keyword dictionary per product, for example `mortgage|escrow|foreclos` → Mortgage, or `collector|collection agency` → Debt collection. The first match wins, and no match means route = manual. This is what a desk without ML would run. It is the baseline that the business metric "from 15%" is assumed against.
+
+**Candidate.** TF-IDF on the narrative (word 1–2-grams plus character 3–5-grams) concatenated with one-hot form fields, feeding multinomial logistic regression with class weights. Probabilities are calibrated (isotonic) on the validation month so that the `auto` threshold means what it says. It trains in minutes on a CPU, serves in milliseconds and stays small in memory (requirements in 4).
+
+**Feature list and serving-time source.**
+
+| Feature | Training-time source | Serving-time source |
+|---|---|---|
+| Narrative TF-IDF (word and char) | `clean/` Parquet, column `narrative_clean` | `narrative` in the request, passed through the **same** `preprocess()` function shipped inside the model artifact |
+| Narrative length (chars, log) | `clean/` Parquet | computed from the request |
+| `submitted_via` one-hot | CFPB `Submitted via` | request field. Missing becomes `unknown`. |
+| `state` one-hot | CFPB `State` | request field. Missing becomes `unknown`. |
+| `company_bucket` (top 200 companies + `other`) | CFPB **normalized** `Company` | request **raw** `company`, mapped by a company alias table. **The serving source differs from the training source.** An unmatched name becomes `other`, and the unmatched rate is monitored (6.6). |
+
+CFPB replaces redacted personal data with `XXXX`. The preprocessing applies the same masking at serving time (digits and e-mails become `XXXX`), so that raw intake text matches the redacted training text. This is the second skew point.
+
+### 5.4 Experimentation and validation
+
+**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train ≤ 2025-12, validation 2026-01 to 2026-03 (threshold and calibration), test 2026-04 to 2026-06 (reported once). For model comparison Lab 2 runs a rolling-origin backtest over the last three months, one fold per month.
+
+**Offline metrics.** Macro-F1 (optimizing), per-class recall, precision and coverage at the chosen threshold, and the confusion matrix logged as an artifact.
+
+**Comparing a new model with the current one.** Champion and challenger are scored on the same most recent labeled month. The challenger becomes a promotion candidate only if all of these hold:
+
+1. Macro-F1 ≥ champion + 0.01.
+2. No class loses more than 3 pp of recall.
+3. Precision at threshold ≥ 0.95, with coverage not more than 5 pp below the champion's.
+4. p95 latency on the replay set ≤ 300 ms.
+
+Promotion itself is a human step (5.5).
+
+### 5.5 Human in the loop
+
+| Event | Who | What they do |
+|---|---|---|
+| Drift alert | ML on-call (project owner) | Within 1 business day, opens the Evidently report linked in the alert and either acknowledges it as expected (for example a seasonal shift), triggers retraining, or opens a taxonomy-map change if a new product appeared. |
+| Model promotion | Project owner (approver) | Reviews the challenger and champion comparison in MLflow and moves the `@champion` alias by hand. The pipeline can only set `@challenger`. Rollback means moving `@champion` back. |
+| Override of a prediction | Triage agent | Reassigns the ticket's queue in the Triage desk. The reassignment is written to the label log with `source = human_override` and takes precedence over the delayed CFPB label for that complaint. |
+| Low confidence | Triage agent | Every `route = manual` complaint is routed by a human, with the top-3 prediction shown as a suggestion. |
+
+## 6 Implementation
+
+### 6.1 High-level design
+
+#### System context
+
+```mermaid
+flowchart LR
+    CCDB["CFPB Complaint Database<br/>(daily CSV export)"] -- "raw complaints + product labels (daily batch)" --> SYS
+    INTAKE["Intake channel<br/>(simulated: replay script)"] -- "new complaint text (per request)" --> TRIAGE
+    TRIAGE["Triage desk<br/>(ticketing queue, simulated)"] -- "POST /predict" --> SYS
+    SYS -- "product + confidence + route" --> TRIAGE
+    LABELS["Routing outcomes<br/>(CFPB Product, 15-day delay; agent overrides)"] -- "labels" --> SYS
+    CORPUS["Ask CFPB + eCFR regulations<br/>(Lab 3 corpus)"] -- "policy documents" --> SYS
+    SYS -- "drift / quality / latency alerts" --> ONCALL["ML on-call<br/>(project owner, e-mail)"]
+
+    SYS["complaint-router<br/>ingests, trains, serves, monitors"]
+
+    classDef sys fill:#1f4fbf,color:#fff,stroke:#1f4fbf;
+    class SYS sys;
+```
+
+*One box. Everything outside it belongs to someone else.*
+
+#### Data flow (seven layers)
+
+```mermaid
+flowchart TB
+    subgraph L1["1 · Data ingestion"]
+        ING["Airflow DAG ccdb_pipeline<br/>task ingest_ccdb: download export,<br/>slice month by date_received<br/>(batch, daily; train_eval monthly)"]
+    end
+    VP(("VERSION POINT<br/>DVC snapshot of<br/>raw/month=YYYY-MM<br/>on MinIO"))
+    subgraph L2["2 · Preprocessing and transformation"]
+        PRE["task clean_month:<br/>parse, drop leakage columns,<br/>map taxonomy (taxonomy_map.csv),<br/>mask PII, drop empty narratives"]
+    end
+    QG(("QUALITY GATE<br/>pandera schema +<br/>row count, null-narrative rate,<br/>unmapped-label = 0"))
+    subgraph L3["3 · Feature store"]
+        OFF["OFFLINE: features/ Parquet on MinIO<br/>(per-month, DVC-versioned)"]
+        ON["ONLINE: not a store. Features come<br/>from the request, transformed in-process<br/>by the same preprocess() in the model"]
+    end
+    subgraph L4["4 · Training pipeline"]
+        TR["Airflow task train_eval:<br/>TF-IDF + LogReg, calibration,<br/>time split, backtest;<br/>logs to MLflow"]
+    end
+    subgraph L5["5 · Registry and deployment"]
+        REG["MLflow Model Registry<br/>alias @challenger (pipeline)<br/>alias @champion (human, 5.4 rule)"]
+    end
+    subgraph L6["6 · Inference"]
+        RT["REAL-TIME: complaint-router-api<br/>(FastAPI) POST /predict<br/>loads @champion"]
+        BT["BATCH: nightly rescoring of<br/>yesterday's log for monitoring"]
+    end
+    CONS["Triage desk<br/>(auto / manual queue)"]
+    subgraph L7["7 · Monitoring and retraining loop"]
+        MON["Evidently daily report: input + prediction drift,<br/>confidence; macro-F1 once labels arrive (15 d);<br/>Prometheus/Grafana: latency, errors;<br/>alert to ML on-call; triggers train_eval"]
+    end
+    PG[("PostgreSQL<br/>prediction_log, label_log")]
+
+    ING --> VP --> PRE --> QG --> OFF
+    OFF -- "TRAINING PATH (offline)" --> TR
+    TR -- "evaluate, register" --> REG
+    REG -- "by alias @champion" --> RT
+    ON -. "SERVING PATH (online)" .-> RT
+    RT --> CONS
+    RT -- "inputs, predictions" --> PG
+    BT --> PG
+    PG -- "inputs, predictions, labels" --> MON
+    MON -- "trigger retraining" --> TR
+
+    classDef mark fill:#fff,stroke:#d33,stroke-width:3px,color:#d33;
+    class VP,QG mark;
+    classDef inf fill:#1f4fbf,color:#fff,stroke:#1f4fbf;
+    class RT,BT inf;
+```
+
+The three marks:
+
+- **Version point:** the DVC snapshot of each raw monthly slice, taken before any transformation, so every downstream artifact can name the raw data it came from.
+- **Quality check:** the pandera gate between preprocessing and the offline features. A bad batch fails the DAG run and is not written to `features/`.
+- **Divergence:** training reads the *offline* Parquet and serving builds features *online* from the request. This is where training/serving skew can enter: the company-name mapping and PII masking (5.3). It is contained by shipping `preprocess()` inside the model artifact.
+
+Layer 3 has no online feature store on purpose. Every v1 feature is computed from the request itself (Feast was rejected in 7.1).
+
+#### Deployment (first draft)
+
+```mermaid
+flowchart TB
+    subgraph LAPTOP["Laptop: Docker Compose (Lab 2) → Minikube 1.33.1, 4 GB (Lab 4)"]
+        direction LR
+        MINIO["MinIO (pgsty/silo)<br/><i>S3 / Cloud Storage / Blob</i>"]
+        DVC["DVC 3.67.1 remote on MinIO<br/><i>S3 / GCS / Blob remote</i>"]
+        AF["Airflow 3.3.1<br/><i>MWAA / Cloud Composer / Data Factory</i>"]
+        PGS["PostgreSQL 16<br/><i>RDS / Cloud SQL / Azure DB for PG</i>"]
+        MLF["MLflow 3.16.1<br/><i>SageMaker MLflow / Vertex AI / Azure ML</i>"]
+        API["complaint-router-api<br/>FastAPI + model<br/><i>EKS / GKE / AKS</i>"]
+        EV["Evidently<br/><i>SageMaker Model Monitor / Vertex AI Monitoring / Azure ML monitoring</i>"]
+        PROM["Prometheus + Grafana<br/><i>CloudWatch / Cloud Monitoring / Azure Monitor</i>"]
+        VEC["pgvector 0.8.7 (Lab 3)<br/><i>OpenSearch Serverless / Vertex AI Vector Search / Azure AI Search</i>"]
+        LLM["LLM inference (Lab 3)<br/><i>Bedrock / Vertex AI / Azure OpenAI</i>"]
+    end
+    classDef inf fill:#1f4fbf,color:#fff,stroke:#1f4fbf;
+    class API inf;
+```
+
+*First draft. Lab 4 replaces it with the real cluster topology.*
+
+### 6.2 Infra
+
+The local stack is pinned to the course reference. Cloud columns are what would be used instead; they are named here, not run.
+
+| Component | Role in this system | Local (pinned) | AWS (chosen for 6.7) | GCP | Azure |
+|---|---|---|---|---|---|
+| Object storage | `raw/`, `clean/`, `features/` buckets, MLflow artifacts | MinIO-compatible `pgsty/silo:RELEASE.2026-09-16T00-00-00Z` | Amazon S3 | Cloud Storage | Blob Storage |
+| Data versioning | Version point on raw monthly slices | DVC 3.67.1 + dvc-s3 3.3.0, remote on MinIO | S3 remote | GCS remote | Azure Blob remote |
+| Database | MLflow backend, `prediction_log`, `label_log` | PostgreSQL 16 | Amazon RDS for PostgreSQL | Cloud SQL | Azure Database for PostgreSQL |
+| Orchestrator | DAG `ccdb_pipeline`: daily ingest → clean → gate of the current month partition, monthly (or triggered) train_eval; nightly monitoring DAG | Apache Airflow 3.3.1, LocalExecutor | Amazon MWAA | Cloud Composer | Azure Data Factory |
+| Experiment tracking and registry | Runs, `@champion` / `@challenger` aliases | MLflow 3.16.1 (Postgres backend, MinIO artifacts) | SageMaker with MLflow | Vertex AI Experiments + Model Registry | Azure ML with MLflow |
+| Feature store | Offline only (Parquet on MinIO). Feast 0.66.0 **not used in v1** (7.1). | — | (SageMaker Feature Store, not used) | (Vertex AI Feature Store, not used) | (Azure ML feature store, not used) |
+| Model service | `complaint-router-api` (FastAPI) | Docker image → Minikube | Amazon EKS | GKE | AKS |
+| Container registry | Images tagged with commit | Minikube built-in registry | Amazon ECR | Artifact Registry | Azure Container Registry |
+| Kubernetes cluster | Runs services in Lab 4 | Minikube 1.33.1 (K8s 1.30.0, docker driver, 4 GB) | Amazon EKS | GKE | AKS |
+| Model and data monitoring | Daily drift and performance reports | Evidently | SageMaker Model Monitor | Vertex AI Model Monitoring | Azure ML model monitoring |
+| Metrics and dashboards | Latency, errors, alert rules | Prometheus, Grafana | Amazon CloudWatch | Cloud Monitoring | Azure Monitor |
+| Vector store (Lab 3) | Index over Ask CFPB + eCFR passages | pgvector 0.8.7 (`pgvector/pgvector:pg16`) | OpenSearch Serverless vector search | Vertex AI Vector Search | Azure AI Search |
+| LLM inference (Lab 3) | Routing rationale with citations | vLLM 0.30.0 on CPU, or a hosted API. **Assumption:** a hosted API, decided in Lab 3. | Amazon Bedrock | Vertex AI generative AI | Azure OpenAI |
+
+### 6.3 Performance
+
+**Batch versus online: online for routing, batch for monitoring.** Routing has to happen when a complaint arrives. A batch job that runs every N minutes would add N minutes to every complaint, and at about 1 req/s peak a single small replica costs less than a scheduler. Monitoring has no latency requirement, so it runs as a nightly batch over the prediction log.
+
+| Budget | Target | Basis |
+|---|---|---|
+| Expected load | ~0.12 req/s average, ~1.2 req/s peak | Assumption: 10k/day, 10× peak |
+| Design throughput | 20 req/s on one replica (1 CPU, 1 GB) | More than 15× headroom over peak. Verified with a load test in Lab 4. |
+| p95 latency | ≤ 300 ms end to end at the service | Split: JSON parse + preprocess ≤ 20 ms, vectorize + predict ≤ 30 ms, logging ≤ 50 ms (async), the rest is headroom for the network and the cluster |
+| Lab 3 LLM rationale | Not on the routing path. Generated asynchronously for `manual` complaints only, p95 ≤ 10 s. | Keeps the LLM from ever blocking routing |
+| Training | ≤ 30 min on a laptop CPU for 24 months of narratives | Assumption until Lab 2 measures it |
+
+### 6.4 Security
+
+- **Secrets** (MinIO keys, Postgres password, API key, LLM API key) live in a git-ignored `.env` locally, in Kubernetes Secrets in Lab 4, and in AWS Secrets Manager in the cloud column. Nothing secret is committed, and the CI lint job needs none.
+- **Who may call the service:** only the Triage desk, with an `X-API-Key` header. In Minikube the service is `ClusterIP` and is not exposed outside the cluster except through port-forward for demos.
+- MLflow, Airflow and Grafana UIs are bound to localhost only.
+
+### 6.5 Data privacy
+
+- CFPB publishes narratives only with consumer consent and scrubs personal data, replacing it with `XXXX`. Residual personal data (names, account fragments) is still possible.
+- The service applies the same masking at intake (5.3). `prediction_log` stores a SHA-256 hash of the narrative, never the raw text, plus derived features (length, OOV rate) for monitoring.
+- **Retention:** raw monthly snapshots are kept for the life of the course project (needed for reproducibility). `prediction_log` and `label_log` are kept 180 days, which covers the 15-day label delay plus six monthly comparisons. Nothing is shared outside the repository and its local stack.
+
+### 6.6 Monitoring and alarms
+
+First draft. Lab 4 implements it.
+
+| What | Metric | Threshold → alert | Window | Recipient |
+|---|---|---|---|---|
+| Ingestion freshness | max(`date_received`) in the newest snapshot | older than today − 3 days | daily | ML on-call |
+| Ingestion idempotence | rows ingested for month M on re-run | differs from the previous run of M by > 0.5%, or **equal to the previous interval's count** (same partition read twice) | per run | ML on-call |
+| Quality gate | pandera failures, unmapped product labels, null-narrative rate | any failure, any unmapped label, null rate > 2× reference | per run | ML on-call (run fails) |
+| Prediction drift | PSI of predicted class distribution vs reference month | > 0.2 | daily | ML on-call |
+| Input drift | OOV-token rate, median narrative length, `submitted_via` mix | OOV rate +50% relative to reference, or Evidently drift share > 30% | daily | ML on-call |
+| Confidence drift | mean max-probability; share routed `auto` | drop > 0.05; `auto` share < 50% | daily | ML on-call |
+| Skew | `company` unmatched-alias rate | > 15% | daily | ML on-call |
+| Model quality (once labels arrive) | macro-F1, per-class recall on the labeled window | macro-F1 < 0.75, or any class recall −10 pp vs test | weekly, 15-day lag | ML on-call → retrain trigger |
+| Service | p95 latency, 5xx rate, readiness | p95 > 300 ms for 5 min; 5xx > 1% for 5 min; not ready > 1 min | continuous | ML on-call |
+
+Alerts go out as Grafana alert e-mails. **Assumption:** a single recipient, the project owner, during business hours.
+
+### 6.7 Cost
+
+An estimate of the AWS column for one month in `us-east-1`. Nothing here is run. Prices are list-price **assumptions** to be checked against the [AWS pricing calculator](https://calculator.aws/) and revised in Lab 3/4.
+
+| Service | Sizing assumption | ≈ USD / month |
+|---|---|---|
+| Amazon S3 | 100 GB standard (raw zips + Parquet + artifacts), low request volume | 3 |
+| Amazon RDS for PostgreSQL | db.t4g.micro, single-AZ, 20 GB gp3 | 15 |
+| Amazon MWAA | smallest environment class, always on | 250 |
+| SageMaker with MLflow | small tracking server, 10 h × 22 business days | 150 |
+| Amazon EKS | control plane ($0.10/h) + 2 × t3.medium nodes | 135 |
+| Amazon ECR | < 5 GB images | 1 |
+| Amazon CloudWatch | metrics, logs (< 10 GB), a few alarms | 15 |
+| SageMaker Model Monitor | replaced by Evidently as an EKS CronJob (already counted in EKS) | 0 |
+| OpenSearch Serverless (Lab 3) | minimum capacity units for a small vector collection | 175 |
+| Amazon Bedrock (Lab 3) | ~20% of 300k complaints/month get a rationale: 60k calls × (1.5k in + 200 out) tokens on a small model | 150 |
+| **Total** | | **≈ 900** |
+
+The total is above the $800 ceiling in section 4. The first lever is the vector store: pgvector inside the existing RDS instance instead of OpenSearch Serverless brings the total to about $720. That is the planned choice, to be confirmed in Lab 3. The most fragile assumption is the LLM call volume, which scales linearly with complaints and with the share routed manually.
+
+### 6.8 Integration points
+
+| Party | Direction | Owner | Contract |
+|---|---|---|---|
+| CFPB Consumer Complaint Database | upstream data | CFPB (external, no SLA) | Daily full CSV export with the documented field set. We tolerate up to 3 days of staleness. A schema change is detected at the quality gate (column set and types) and fails the run without touching `features/`. |
+| Intake channel | upstream requests | simulated (replay script) | Delivers complaints to the Triage desk with `complaint_id`, `narrative` and form fields. |
+| Triage desk | downstream consumer | intake desk (simulated) | Calls `POST /predict` per F1/F2 with a 2 s timeout. On error or timeout it falls back to the manual queue. Response fields are versioned and new fields are additive only. |
+| Routing outcomes (labels) | upstream labels | intake desk + CFPB | `complaint_id`, final `product`, `source ∈ {cfpb_delayed, human_override}` and timestamp, delivered ≥ 15 days after prediction. |
+| ML on-call | downstream alerts | project owner | E-mail alerts per 6.6, acknowledged within 1 business day. |
+| Ask CFPB + eCFR (Lab 3) | upstream documents | CFPB, Office of the Federal Register | Public pages and regulation XML, re-fetched monthly and versioned like data. |
+
+### 6.9 Risks and uncertainties
+
+| Risk | Mitigation |
+|---|---|
+| **The data source changes or disappears.** The export is free, has no SLA and depends on a public agency's continued operation. | Every ingested month is snapshotted to DVC, so the project can always rebuild from its own copy and replay stored months. |
+| **Taxonomy change** (new or renamed products) silently creates a new class or merges two. | Versioned `taxonomy_map.csv`. An unmapped label fails the quality gate and alerts. |
+| **Label proxy is noisy.** The consumer-chosen product is not always the right team. | Measure noise on 200 hand-labeled rows in Lab 2. Agent overrides take precedence as labels. |
+| **Severe class imbalance** (credit reporting dominates). | Class weights, macro-F1 as the optimizing metric, per-class recall in the promotion rule. |
+| **Selection bias:** narratives exist only for consenting consumers. | State it as a known limit. Complaints without a narrative go to manual triage (out of scope). |
+| **Training/serving skew** in company names and PII masking. | `preprocess()` ships inside the model artifact. Unmatched-alias rate is monitored (6.6). |
+| **Laptop resources:** the full stack might not fit in 4 GB in Lab 4. | Small linear model. Airflow LocalExecutor. Lab 3 LLM via a hosted API rather than local vLLM if memory is short. |
+| **The emulated label delay hides real dynamics** (real delays vary). | The delay is a parameter of the label release job. Lab 4 can test 7 and 30 days as well. |
+
+## 7 Appendix
+
+### 7.1 Alternatives
+
+| Alternative | Pros | Cons | Decision |
+|---|---|---|---|
+| **Feast online feature store** for company-level aggregates (for example a company's product mix over the last 90 days) | Real online/offline split, a richer signal, uses the reference stack | Needs a materialization job and an online store in a 4 GB cluster. Point-in-time correctness is extra work. The narrative already carries most of the signal. | **Rejected for v1.** Revisit if the Lab 2 error analysis shows the company signal matters. |
+| **Fine-tuned transformer** (for example DistilBERT) instead of TF-IDF + LR | Likely +3–8 pp macro-F1 and more robust to paraphrase | GPU or slow CPU training, more than 250 MB model, harder to meet 300 ms p95 on 1 CPU, slower retrain loop | **Rejected for v1.** It is the obvious challenger once the pipeline exists. |
+| **Zero-shot LLM as the primary classifier** | No training. Handles a new product by editing the prompt. | Per-call cost at 10k/day, latency in seconds, non-deterministic, hard to version against a label set | **Rejected as router.** Used in Lab 3 as a rationale assistant. |
+| **Kafka streaming ingestion** | Matches a real intake stream | The source is a daily batch export, so streaming adds infra with no freshness gain | **Rejected.** Serving is already online. Ingestion stays batch. |
+| **Different dataset:** HuffPost News Category for news classification | Clean, small, text-native | Ends in 2022, no label delay story, no natural owner/consumer | **Rejected** in favor of CFPB. |
+
+### 7.2 Data pipeline and experiment results
+
+*Placeholder. Lab 2 fills this in: data profile (rows per month, narrative share, class mix), label-noise measurement, baseline vs candidate scores, MLflow run links.*
+
+### 7.3 Serving and monitoring results
+
+*Placeholder. Lab 4 fills this in: load test, real deployment topology, drift injection result and the alert received.*
+
+### 7.4 Milestones
+
+| Lab | What it adds to this system |
+|---|---|
+| 2 | Airflow DAG `ccdb_pipeline` ingests, versions (DVC on MinIO), validates (pandera gate) and trains both baselines and the TF-IDF + LR candidate with MLflow tracking, registering a `@challenger` with data version and commit. |
+| 3 | An LLM rationale component retrieves Ask CFPB and eCFR passages from pgvector and explains manual-queue routings, with an evaluation set, versioned prompts, and logged token cost and p50/p95 latency. |
+| 4 | `complaint-router-api` is containerized and deployed on Minikube with health probes, a nightly Evidently job and Prometheus/Grafana, and an injected drift (replaying a post-taxonomy-change month) reaches the ML on-call alert. |
+| 5 | An agent runs the operations playbook: reads drift reports, compares `@challenger` with `@champion` against the 5.4 rule and drafts a promotion note for the human approver, with traces and a ten-task evaluation. |
