@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Routes consumer financial complaints to the right product queue (KSE MLOps course project)."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "polars>=2.0.0",
+]
 
 [dependency-groups]
 dev = [

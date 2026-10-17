@@ -3,7 +3,8 @@ __pycache__/
 *.pyc
 .ruff_cache/
 .env
-data/
+data/*
+!data/sample/
 mlruns/
 .DS_Store
 .idea/

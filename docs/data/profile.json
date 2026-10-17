@@ -1,0 +1,1367 @@
+{
+ "snapshot": {
+  "rows": 16558052,
+  "rows_with_text": 3815251,
+  "date_min": "2011-12-01",
+  "date_max": "2026-07-06",
+  "monthly": [
+   {
+    "month": "2011-12",
+    "rows": 2536,
+    "with_text": 0
+   },
+   {
+    "month": "2012-01",
+    "rows": 3230,
+    "with_text": 0
+   },
+   {
+    "month": "2012-02",
+    "rows": 3509,
+    "with_text": 0
+   },
+   {
+    "month": "2012-03",
+    "rows": 6229,
+    "with_text": 0
+   },
+   {
+    "month": "2012-04",
+    "rows": 5703,
+    "with_text": 0
+   },
+   {
+    "month": "2012-05",
+    "rows": 7614,
+    "with_text": 0
+   },
+   {
+    "month": "2012-06",
+    "rows": 7841,
+    "with_text": 0
+   },
+   {
+    "month": "2012-07",
+    "rows": 6755,
+    "with_text": 0
+   },
+   {
+    "month": "2012-08",
+    "rows": 6877,
+    "with_text": 0
+   },
+   {
+    "month": "2012-09",
+    "rows": 5492,
+    "with_text": 0
+   },
+   {
+    "month": "2012-10",
+    "rows": 6741,
+    "with_text": 0
+   },
+   {
+    "month": "2012-11",
+    "rows": 6139,
+    "with_text": 0
+   },
+   {
+    "month": "2012-12",
+    "rows": 6238,
+    "with_text": 0
+   },
+   {
+    "month": "2013-01",
+    "rows": 9741,
+    "with_text": 0
+   },
+   {
+    "month": "2013-02",
+    "rows": 8349,
+    "with_text": 0
+   },
+   {
+    "month": "2013-03",
+    "rows": 8785,
+    "with_text": 0
+   },
+   {
+    "month": "2013-04",
+    "rows": 8632,
+    "with_text": 0
+   },
+   {
+    "month": "2013-05",
+    "rows": 8170,
+    "with_text": 0
+   },
+   {
+    "month": "2013-06",
+    "rows": 8035,
+    "with_text": 0
+   },
+   {
+    "month": "2013-07",
+    "rows": 9270,
+    "with_text": 0
+   },
+   {
+    "month": "2013-08",
+    "rows": 9564,
+    "with_text": 0
+   },
+   {
+    "month": "2013-09",
+    "rows": 9636,
+    "with_text": 0
+   },
+   {
+    "month": "2013-10",
+    "rows": 9240,
+    "with_text": 0
+   },
+   {
+    "month": "2013-11",
+    "rows": 9318,
+    "with_text": 0
+   },
+   {
+    "month": "2013-12",
+    "rows": 9474,
+    "with_text": 0
+   },
+   {
+    "month": "2014-01",
+    "rows": 12615,
+    "with_text": 0
+   },
+   {
+    "month": "2014-02",
+    "rows": 13046,
+    "with_text": 0
+   },
+   {
+    "month": "2014-03",
+    "rows": 13940,
+    "with_text": 0
+   },
+   {
+    "month": "2014-04",
+    "rows": 13834,
+    "with_text": 0
+   },
+   {
+    "month": "2014-05",
+    "rows": 12158,
+    "with_text": 0
+   },
+   {
+    "month": "2014-06",
+    "rows": 12508,
+    "with_text": 0
+   },
+   {
+    "month": "2014-07",
+    "rows": 13402,
+    "with_text": 0
+   },
+   {
+    "month": "2014-08",
+    "rows": 13169,
+    "with_text": 0
+   },
+   {
+    "month": "2014-09",
+    "rows": 12454,
+    "with_text": 0
+   },
+   {
+    "month": "2014-10",
+    "rows": 12882,
+    "with_text": 0
+   },
+   {
+    "month": "2014-11",
+    "rows": 11243,
+    "with_text": 0
+   },
+   {
+    "month": "2014-12",
+    "rows": 11658,
+    "with_text": 0
+   },
+   {
+    "month": "2015-01",
+    "rows": 12608,
+    "with_text": 0
+   },
+   {
+    "month": "2015-02",
+    "rows": 12657,
+    "with_text": 0
+   },
+   {
+    "month": "2015-03",
+    "rows": 14489,
+    "with_text": 2375
+   },
+   {
+    "month": "2015-04",
+    "rows": 13729,
+    "with_text": 5376
+   },
+   {
+    "month": "2015-05",
+    "rows": 13671,
+    "with_text": 5643
+   },
+   {
+    "month": "2015-06",
+    "rows": 14502,
+    "with_text": 5904
+   },
+   {
+    "month": "2015-07",
+    "rows": 15895,
+    "with_text": 6627
+   },
+   {
+    "month": "2015-08",
+    "rows": 15756,
+    "with_text": 6452
+   },
+   {
+    "month": "2015-09",
+    "rows": 14320,
+    "with_text": 5759
+   },
+   {
+    "month": "2015-10",
+    "rows": 14879,
+    "with_text": 6258
+   },
+   {
+    "month": "2015-11",
+    "rows": 12890,
+    "with_text": 5136
+   },
+   {
+    "month": "2015-12",
+    "rows": 12877,
+    "with_text": 5193
+   },
+   {
+    "month": "2016-01",
+    "rows": 13827,
+    "with_text": 5649
+   },
+   {
+    "month": "2016-02",
+    "rows": 14131,
+    "with_text": 5578
+   },
+   {
+    "month": "2016-03",
+    "rows": 16599,
+    "with_text": 6406
+   },
+   {
+    "month": "2016-04",
+    "rows": 15595,
+    "with_text": 6212
+   },
+   {
+    "month": "2016-05",
+    "rows": 15510,
+    "with_text": 6192
+   },
+   {
+    "month": "2016-06",
+    "rows": 16054,
+    "with_text": 6332
+   },
+   {
+    "month": "2016-07",
+    "rows": 16032,
+    "with_text": 6561
+   },
+   {
+    "month": "2016-08",
+    "rows": 17680,
+    "with_text": 7086
+   },
+   {
+    "month": "2016-09",
+    "rows": 17559,
+    "with_text": 7484
+   },
+   {
+    "month": "2016-10",
+    "rows": 17788,
+    "with_text": 7541
+   },
+   {
+    "month": "2016-11",
+    "rows": 15194,
+    "with_text": 6140
+   },
+   {
+    "month": "2016-12",
+    "rows": 15325,
+    "with_text": 6585
+   },
+   {
+    "month": "2017-01",
+    "rows": 20988,
+    "with_text": 9473
+   },
+   {
+    "month": "2017-02",
+    "rows": 18078,
+    "with_text": 7656
+   },
+   {
+    "month": "2017-03",
+    "rows": 19740,
+    "with_text": 8462
+   },
+   {
+    "month": "2017-04",
+    "rows": 18533,
+    "with_text": 8539
+   },
+   {
+    "month": "2017-05",
+    "rows": 19278,
+    "with_text": 9696
+   },
+   {
+    "month": "2017-06",
+    "rows": 18546,
+    "with_text": 9183
+   },
+   {
+    "month": "2017-07",
+    "rows": 20418,
+    "with_text": 10022
+   },
+   {
+    "month": "2017-08",
+    "rows": 21381,
+    "with_text": 10315
+   },
+   {
+    "month": "2017-09",
+    "rows": 27336,
+    "with_text": 13598
+   },
+   {
+    "month": "2017-10",
+    "rows": 20444,
+    "with_text": 9945
+   },
+   {
+    "month": "2017-11",
+    "rows": 18980,
+    "with_text": 9186
+   },
+   {
+    "month": "2017-12",
+    "rows": 19023,
+    "with_text": 9236
+   },
+   {
+    "month": "2018-01",
+    "rows": 23633,
+    "with_text": 11465
+   },
+   {
+    "month": "2018-02",
+    "rows": 21959,
+    "with_text": 10508
+   },
+   {
+    "month": "2018-03",
+    "rows": 23620,
+    "with_text": 11139
+   },
+   {
+    "month": "2018-04",
+    "rows": 24314,
+    "with_text": 10662
+   },
+   {
+    "month": "2018-05",
+    "rows": 22321,
+    "with_text": 10389
+   },
+   {
+    "month": "2018-06",
+    "rows": 20093,
+    "with_text": 9038
+   },
+   {
+    "month": "2018-07",
+    "rows": 20945,
+    "with_text": 9492
+   },
+   {
+    "month": "2018-08",
+    "rows": 21710,
+    "with_text": 9833
+   },
+   {
+    "month": "2018-09",
+    "rows": 19064,
+    "with_text": 8339
+   },
+   {
+    "month": "2018-10",
+    "rows": 21883,
+    "with_text": 10049
+   },
+   {
+    "month": "2018-11",
+    "rows": 19046,
+    "with_text": 8830
+   },
+   {
+    "month": "2018-12",
+    "rows": 18544,
+    "with_text": 8649
+   },
+   {
+    "month": "2019-01",
+    "rows": 18927,
+    "with_text": 8530
+   },
+   {
+    "month": "2019-02",
+    "rows": 20194,
+    "with_text": 9609
+   },
+   {
+    "month": "2019-03",
+    "rows": 23400,
+    "with_text": 10363
+   },
+   {
+    "month": "2019-04",
+    "rows": 22905,
+    "with_text": 10090
+   },
+   {
+    "month": "2019-05",
+    "rows": 23841,
+    "with_text": 10473
+   },
+   {
+    "month": "2019-06",
+    "rows": 23335,
+    "with_text": 10606
+   },
+   {
+    "month": "2019-07",
+    "rows": 25070,
+    "with_text": 11160
+   },
+   {
+    "month": "2019-08",
+    "rows": 26043,
+    "with_text": 12056
+   },
+   {
+    "month": "2019-09",
+    "rows": 23565,
+    "with_text": 10345
+   },
+   {
+    "month": "2019-10",
+    "rows": 25624,
+    "with_text": 11708
+   },
+   {
+    "month": "2019-11",
+    "rows": 22641,
+    "with_text": 10243
+   },
+   {
+    "month": "2019-12",
+    "rows": 21696,
+    "with_text": 9660
+   },
+   {
+    "month": "2020-01",
+    "rows": 26394,
+    "with_text": 11575
+   },
+   {
+    "month": "2020-02",
+    "rows": 25079,
+    "with_text": 10955
+   },
+   {
+    "month": "2020-03",
+    "rows": 29480,
+    "with_text": 13133
+   },
+   {
+    "month": "2020-04",
+    "rows": 34794,
+    "with_text": 15201
+   },
+   {
+    "month": "2020-05",
+    "rows": 36987,
+    "with_text": 16347
+   },
+   {
+    "month": "2020-06",
+    "rows": 37888,
+    "with_text": 15710
+   },
+   {
+    "month": "2020-07",
+    "rows": 40639,
+    "with_text": 17255
+   },
+   {
+    "month": "2020-08",
+    "rows": 39187,
+    "with_text": 15862
+   },
+   {
+    "month": "2020-09",
+    "rows": 39875,
+    "with_text": 14207
+   },
+   {
+    "month": "2020-10",
+    "rows": 43975,
+    "with_text": 14333
+   },
+   {
+    "month": "2020-11",
+    "rows": 41541,
+    "with_text": 13861
+   },
+   {
+    "month": "2020-12",
+    "rows": 48375,
+    "with_text": 15859
+   },
+   {
+    "month": "2021-01",
+    "rows": 42475,
+    "with_text": 16436
+   },
+   {
+    "month": "2021-02",
+    "rows": 33262,
+    "with_text": 14975
+   },
+   {
+    "month": "2021-03",
+    "rows": 41172,
+    "with_text": 18519
+   },
+   {
+    "month": "2021-04",
+    "rows": 39665,
+    "with_text": 16171
+   },
+   {
+    "month": "2021-05",
+    "rows": 41312,
+    "with_text": 16321
+   },
+   {
+    "month": "2021-06",
+    "rows": 45732,
+    "with_text": 17374
+   },
+   {
+    "month": "2021-07",
+    "rows": 45075,
+    "with_text": 18406
+   },
+   {
+    "month": "2021-08",
+    "rows": 42584,
+    "with_text": 16926
+   },
+   {
+    "month": "2021-09",
+    "rows": 40371,
+    "with_text": 16588
+   },
+   {
+    "month": "2021-10",
+    "rows": 39295,
+    "with_text": 16708
+   },
+   {
+    "month": "2021-11",
+    "rows": 39069,
+    "with_text": 16969
+   },
+   {
+    "month": "2021-12",
+    "rows": 45927,
+    "with_text": 18177
+   },
+   {
+    "month": "2022-01",
+    "rows": 53229,
+    "with_text": 19547
+   },
+   {
+    "month": "2022-02",
+    "rows": 53185,
+    "with_text": 21486
+   },
+   {
+    "month": "2022-03",
+    "rows": 61896,
+    "with_text": 24261
+   },
+   {
+    "month": "2022-04",
+    "rows": 72244,
+    "with_text": 30347
+   },
+   {
+    "month": "2022-05",
+    "rows": 60377,
+    "with_text": 24791
+   },
+   {
+    "month": "2022-06",
+    "rows": 61871,
+    "with_text": 26609
+   },
+   {
+    "month": "2022-07",
+    "rows": 64440,
+    "with_text": 29108
+   },
+   {
+    "month": "2022-08",
+    "rows": 69258,
+    "with_text": 32055
+   },
+   {
+    "month": "2022-09",
+    "rows": 65778,
+    "with_text": 29787
+   },
+   {
+    "month": "2022-10",
+    "rows": 75792,
+    "with_text": 32592
+   },
+   {
+    "month": "2022-11",
+    "rows": 77039,
+    "with_text": 31534
+   },
+   {
+    "month": "2022-12",
+    "rows": 85146,
+    "with_text": 35163
+   },
+   {
+    "month": "2023-01",
+    "rows": 93933,
+    "with_text": 39586
+   },
+   {
+    "month": "2023-02",
+    "rows": 86540,
+    "with_text": 35023
+   },
+   {
+    "month": "2023-03",
+    "rows": 36256,
+    "with_text": 13620
+   },
+   {
+    "month": "2023-04",
+    "rows": 50170,
+    "with_text": 18996
+   },
+   {
+    "month": "2023-05",
+    "rows": 106211,
+    "with_text": 41134
+   },
+   {
+    "month": "2023-06",
+    "rows": 104425,
+    "with_text": 41320
+   },
+   {
+    "month": "2023-07",
+    "rows": 106774,
+    "with_text": 40771
+   },
+   {
+    "month": "2023-08",
+    "rows": 119713,
+    "with_text": 46311
+   },
+   {
+    "month": "2023-09",
+    "rows": 112888,
+    "with_text": 42518
+   },
+   {
+    "month": "2023-10",
+    "rows": 117424,
+    "with_text": 43349
+   },
+   {
+    "month": "2023-11",
+    "rows": 113365,
+    "with_text": 38894
+   },
+   {
+    "month": "2023-12",
+    "rows": 123066,
+    "with_text": 40851
+   },
+   {
+    "month": "2024-01",
+    "rows": 143367,
+    "with_text": 43921
+   },
+   {
+    "month": "2024-02",
+    "rows": 157615,
+    "with_text": 48111
+   },
+   {
+    "month": "2024-03",
+    "rows": 177815,
+    "with_text": 61162
+   },
+   {
+    "month": "2024-04",
+    "rows": 191121,
+    "with_text": 63970
+   },
+   {
+    "month": "2024-05",
+    "rows": 211965,
+    "with_text": 71313
+   },
+   {
+    "month": "2024-06",
+    "rows": 204168,
+    "with_text": 68200
+   },
+   {
+    "month": "2024-07",
+    "rows": 232654,
+    "with_text": 72849
+   },
+   {
+    "month": "2024-08",
+    "rows": 263815,
+    "with_text": 75893
+   },
+   {
+    "month": "2024-09",
+    "rows": 264821,
+    "with_text": 74366
+   },
+   {
+    "month": "2024-10",
+    "rows": 295878,
+    "with_text": 79684
+   },
+   {
+    "month": "2024-11",
+    "rows": 287078,
+    "with_text": 73591
+   },
+   {
+    "month": "2024-12",
+    "rows": 303979,
+    "with_text": 81325
+   },
+   {
+    "month": "2025-01",
+    "rows": 475784,
+    "with_text": 172938
+   },
+   {
+    "month": "2025-02",
+    "rows": 335237,
+    "with_text": 92468
+   },
+   {
+    "month": "2025-03",
+    "rows": 396974,
+    "with_text": 105165
+   },
+   {
+    "month": "2025-04",
+    "rows": 406103,
+    "with_text": 104984
+   },
+   {
+    "month": "2025-05",
+    "rows": 415193,
+    "with_text": 106948
+   },
+   {
+    "month": "2025-06",
+    "rows": 412171,
+    "with_text": 112688
+   },
+   {
+    "month": "2025-07",
+    "rows": 473202,
+    "with_text": 125545
+   },
+   {
+    "month": "2025-08",
+    "rows": 495582,
+    "with_text": 108868
+   },
+   {
+    "month": "2025-09",
+    "rows": 503854,
+    "with_text": 81659
+   },
+   {
+    "month": "2025-10",
+    "rows": 519802,
+    "with_text": 76166
+   },
+   {
+    "month": "2025-11",
+    "rows": 496696,
+    "with_text": 78130
+   },
+   {
+    "month": "2025-12",
+    "rows": 512667,
+    "with_text": 56548
+   },
+   {
+    "month": "2026-01",
+    "rows": 541941,
+    "with_text": 22309
+   },
+   {
+    "month": "2026-02",
+    "rows": 509427,
+    "with_text": 12237
+   },
+   {
+    "month": "2026-03",
+    "rows": 615805,
+    "with_text": 21728
+   },
+   {
+    "month": "2026-04",
+    "rows": 622362,
+    "with_text": 20765
+   },
+   {
+    "month": "2026-05",
+    "rows": 655263,
+    "with_text": 6665
+   },
+   {
+    "month": "2026-06",
+    "rows": 779756,
+    "with_text": 1458
+   },
+   {
+    "month": "2026-07",
+    "rows": 150777,
+    "with_text": 0
+   }
+  ],
+  "yearly": [
+   {
+    "year": "2011",
+    "rows": 2536,
+    "with_text": 0
+   },
+   {
+    "year": "2012",
+    "rows": 72368,
+    "with_text": 0
+   },
+   {
+    "year": "2013",
+    "rows": 108214,
+    "with_text": 0
+   },
+   {
+    "year": "2014",
+    "rows": 152909,
+    "with_text": 0
+   },
+   {
+    "year": "2015",
+    "rows": 168273,
+    "with_text": 54723
+   },
+   {
+    "year": "2016",
+    "rows": 191294,
+    "with_text": 77766
+   },
+   {
+    "year": "2017",
+    "rows": 242745,
+    "with_text": 115311
+   },
+   {
+    "year": "2018",
+    "rows": 257132,
+    "with_text": 118393
+   },
+   {
+    "year": "2019",
+    "rows": 277241,
+    "with_text": 124843
+   },
+   {
+    "year": "2020",
+    "rows": 444214,
+    "with_text": 174298
+   },
+   {
+    "year": "2021",
+    "rows": 495939,
+    "with_text": 203570
+   },
+   {
+    "year": "2022",
+    "rows": 800255,
+    "with_text": 337280
+   },
+   {
+    "year": "2023",
+    "rows": 1170765,
+    "with_text": 442373
+   },
+   {
+    "year": "2024",
+    "rows": 2734276,
+    "with_text": 814385
+   },
+   {
+    "year": "2025",
+    "rows": 5443265,
+    "with_text": 1222107
+   },
+   {
+    "year": "2026",
+    "rows": 3875331,
+    "with_text": 85162
+   }
+  ]
+ },
+ "products": [
+  {
+   "product": "Credit reporting or other personal consumer reports",
+   "product_class": "Credit reporting",
+   "rows": 11075895,
+   "with_text": 1670944,
+   "first_month": "2023-08",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Credit reporting, credit repair services, or other personal consumer reports",
+   "product_class": "Credit reporting",
+   "rows": 2163773,
+   "with_text": 807500,
+   "first_month": "2017-04",
+   "last_month": "2023-08"
+  },
+  {
+   "product": "Debt collection",
+   "product_class": "Debt collection",
+   "rows": 1163391,
+   "with_text": 434150,
+   "first_month": "2013-07",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Mortgage",
+   "product_class": "Mortgage",
+   "rows": 455171,
+   "with_text": 144808,
+   "first_month": "2011-12",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Checking or savings account",
+   "product_class": "Checking or savings",
+   "rows": 381902,
+   "with_text": 182763,
+   "first_month": "2017-04",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Credit card",
+   "product_class": "Credit or prepaid card",
+   "rows": 328478,
+   "with_text": 123076,
+   "first_month": "2011-12",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Credit card or prepaid card",
+   "product_class": "Credit or prepaid card",
+   "rows": 206357,
+   "with_text": 108683,
+   "first_month": "2017-04",
+   "last_month": "2023-08"
+  },
+  {
+   "product": "Money transfer, virtual currency, or money service",
+   "product_class": "Money transfer and virtual currency",
+   "rows": 185579,
+   "with_text": 118842,
+   "first_month": "2017-04",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Credit reporting",
+   "product_class": "Credit reporting",
+   "rows": 140426,
+   "with_text": 31587,
+   "first_month": "2012-10",
+   "last_month": "2017-04"
+  },
+  {
+   "product": "Student loan",
+   "product_class": "Student loan",
+   "rows": 130414,
+   "with_text": 61882,
+   "first_month": "2012-03",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Vehicle loan or lease",
+   "product_class": "Vehicle loan or lease",
+   "rows": 99357,
+   "with_text": 51951,
+   "first_month": "2017-04",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Bank account or service",
+   "product_class": "Checking or savings",
+   "rows": 86198,
+   "with_text": 14883,
+   "first_month": "2012-03",
+   "last_month": "2017-04"
+  },
+  {
+   "product": "Payday loan, title loan, personal loan, or advance loan",
+   "product_class": "Payday title and personal loan",
+   "rows": 34565,
+   "with_text": 17353,
+   "first_month": "2023-08",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Consumer Loan",
+   "product_class": "Payday title and personal loan",
+   "rows": 31560,
+   "with_text": 9458,
+   "first_month": "2012-03",
+   "last_month": "2017-04"
+  },
+  {
+   "product": "Payday loan, title loan, or personal loan",
+   "product_class": "Payday title and personal loan",
+   "rows": 30622,
+   "with_text": 17226,
+   "first_month": "2017-04",
+   "last_month": "2023-08"
+  },
+  {
+   "product": "Prepaid card",
+   "product_class": "Credit or prepaid card",
+   "rows": 22405,
+   "with_text": 11318,
+   "first_month": "2014-07",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Debt or credit management",
+   "product_class": "Debt or credit management",
+   "rows": 9726,
+   "with_text": 5277,
+   "first_month": "2023-08",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Payday loan",
+   "product_class": "Payday title and personal loan",
+   "rows": 5528,
+   "with_text": 1745,
+   "first_month": "2013-11",
+   "last_month": "2017-04"
+  },
+  {
+   "product": "Money transfers",
+   "product_class": "Money transfer and virtual currency",
+   "rows": 5354,
+   "with_text": 1497,
+   "first_month": "2013-04",
+   "last_month": "2017-04"
+  },
+  {
+   "product": "Other financial service",
+   "product_class": null,
+   "rows": 1056,
+   "with_text": 292,
+   "first_month": "2014-07",
+   "last_month": "2017-04"
+  },
+  {
+   "product": null,
+   "product_class": null,
+   "rows": 219,
+   "with_text": 0,
+   "first_month": "2026-06",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Other",
+   "product_class": null,
+   "rows": 57,
+   "with_text": 0,
+   "first_month": "2026-05",
+   "last_month": "2026-07"
+  },
+  {
+   "product": "Virtual currency",
+   "product_class": "Money transfer and virtual currency",
+   "rows": 18,
+   "with_text": 16,
+   "first_month": "2014-08",
+   "last_month": "2017-04"
+  },
+  {
+   "product": "Non-financial product/service",
+   "product_class": null,
+   "rows": 1,
+   "with_text": 0,
+   "first_month": "2016-08",
+   "last_month": "2016-08"
+  }
+ ],
+ "unmapped_rows": 1333,
+ "splits": {
+  "windows": {
+   "train": [
+    "2023-04",
+    "2025-03"
+   ],
+   "validation": [
+    "2025-04",
+    "2025-06"
+   ],
+   "test": [
+    "2025-07",
+    "2025-09"
+   ]
+  },
+  "train": 1539100,
+  "validation": 324620,
+  "test": 316072
+ },
+ "train_class_mix": [
+  {
+   "product_class": "Credit reporting",
+   "rows": 1141303,
+   "share": 0.7415
+  },
+  {
+   "product_class": "Debt collection",
+   "rows": 118514,
+   "share": 0.077
+  },
+  {
+   "product_class": "Credit or prepaid card",
+   "rows": 77149,
+   "share": 0.0501
+  },
+  {
+   "product_class": "Checking or savings",
+   "rows": 68365,
+   "share": 0.0444
+  },
+  {
+   "product_class": "Money transfer and virtual currency",
+   "rows": 64632,
+   "share": 0.042
+  },
+  {
+   "product_class": "Mortgage",
+   "rows": 24096,
+   "share": 0.0157
+  },
+  {
+   "product_class": "Student loan",
+   "rows": 17190,
+   "share": 0.0112
+  },
+  {
+   "product_class": "Vehicle loan or lease",
+   "rows": 15172,
+   "share": 0.0099
+  },
+  {
+   "product_class": "Payday title and personal loan",
+   "rows": 9960,
+   "share": 0.0065
+  },
+  {
+   "product_class": "Debt or credit management",
+   "rows": 2719,
+   "share": 0.0018
+  }
+ ],
+ "train_text_length": {
+  "chars": {
+   "p10": 184.0,
+   "p50": 644.0,
+   "p90": 1990.0,
+   "p99": 5782.0
+  },
+  "words": {
+   "p10": 32.0,
+   "p50": 107.0,
+   "p90": 342.0,
+   "p99": 990.0
+  },
+  "share_with_XXXX_mask": 0.6243
+ },
+ "days_received_to_sent": {
+  "p50": 0.0,
+  "p90": 0.0,
+  "p99": 7.0
+ },
+ "company_response_train_window": [
+  {
+   "company_response_to_consumer": "Closed with explanation",
+   "rows": 2515582
+  },
+  {
+   "company_response_to_consumer": "Closed with non-monetary relief",
+   "rows": 2332527
+  },
+  {
+   "company_response_to_consumer": "Closed with monetary relief",
+   "rows": 44497
+  },
+  {
+   "company_response_to_consumer": "Untimely response",
+   "rows": 3665
+  },
+  {
+   "company_response_to_consumer": null,
+   "rows": 36
+  }
+ ],
+ "official_export": {
+  "columns": [
+   "Date received",
+   "Product",
+   "Sub-product",
+   "Issue",
+   "Sub-issue",
+   "Company public response",
+   "Company",
+   "State",
+   "ZIP code",
+   "Tags",
+   "Submitted via",
+   "Date sent to company",
+   "Company response to consumer",
+   "Timely response?",
+   "Complaint ID"
+  ],
+  "has_narrative_column": false,
+  "rows": 18486121,
+  "monthly_recent": [
+   {
+    "month": "2025-07",
+    "rows": 473183
+   },
+   {
+    "month": "2025-08",
+    "rows": 495567
+   },
+   {
+    "month": "2025-09",
+    "rows": 503847
+   },
+   {
+    "month": "2025-10",
+    "rows": 519782
+   },
+   {
+    "month": "2025-11",
+    "rows": 496657
+   },
+   {
+    "month": "2025-12",
+    "rows": 512474
+   },
+   {
+    "month": "2026-01",
+    "rows": 541263
+   },
+   {
+    "month": "2026-02",
+    "rows": 497119
+   },
+   {
+    "month": "2026-03",
+    "rows": 614959
+   },
+   {
+    "month": "2026-04",
+    "rows": 618309
+   },
+   {
+    "month": "2026-05",
+    "rows": 619979
+   },
+   {
+    "month": "2026-06",
+    "rows": 620869
+   },
+   {
+    "month": "2026-07",
+    "rows": 669978
+   },
+   {
+    "month": "2026-08",
+    "rows": 639426
+   },
+   {
+    "month": "2026-09",
+    "rows": 685414
+   },
+   {
+    "month": "2026-10",
+    "rows": 296444
+   }
+  ]
+ }
+}

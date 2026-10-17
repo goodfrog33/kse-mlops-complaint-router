@@ -6,29 +6,29 @@ Routing consumer financial complaints to the right product queue, with a system 
 |---|---|
 | Author | Zakhar Staryk |
 | Status | Lab 1 draft (design only, no pipeline yet) |
-| Last revised | 2026-10-12 |
+| Last revised | 2026-10-17 (data profiled; source switched to a text snapshot, see 5.2) |
 | Later revisions | Lab 2: 5.2, 5.4, 6.1, 7.2 · Lab 3: 5.3, 6.2, 6.7 · Lab 4: 6.1 (deployment), 6.3, 6.6, 7.3 · Lab 5: 6.8, 7.4 |
 
-Statements marked **Assumption:** are decisions taken without evidence yet. Each one names the lab that will confirm or replace it.
+Statements marked **Assumption:** are decisions taken without evidence yet. Each one names the lab that will confirm or replace it. Statements marked **Measured:** come from `scripts/profile_data.py`; the full numbers are in [`docs/data-profile.md`](data-profile.md).
 
 ---
 
 ## 1 Overview
 
-A complaint intake desk gets about ten thousand free-text consumer complaints a day about financial products (mortgages, credit cards, credit reports, debt collection and more). Each one has to reach the team that owns that product, and a complaint that lands in the wrong queue waits days before someone reroutes it. complaint-router reads the complaint text when it arrives and predicts the product queue with a confidence score. Complaints it is confident about are routed automatically; the rest go to a human triage queue with the prediction as a suggestion. The goal is fewer misrouted complaints and less manual triage, from a model that is retrained as the product mix and complaint vocabulary change.
+A complaint intake desk gets fifteen to twenty thousand free-text consumer complaints a day about financial products (mortgages, credit cards, credit reports, debt collection and more). Each one has to reach the team that owns that product, and a complaint that lands in the wrong queue waits days before someone reroutes it. complaint-router reads the complaint text when it arrives and predicts the product queue with a confidence score. Complaints it is confident about are routed automatically; the rest go to a human triage queue with the prediction as a suggestion. The goal is fewer misrouted complaints and less manual triage, from a model that is retrained as the product mix and complaint vocabulary change.
 
 ## 2 Motivation
 
 **Who consumes the predictions.** The intake desk's ticketing queue (the *Triage desk* in the diagrams) calls the service once per new complaint and uses the answer to set the ticket's queue. Triage agents see the prediction and its confidence on every complaint that is not auto-routed.
 
-**How often.** Continuously during intake hours, one request per complaint. **Assumption:** about 10,000 complaints a day with peaks of 10× the average rate. This is the order of magnitude of recent CFPB volume, which is the data this project uses (section 5.2).
+**How often.** Continuously during intake hours, one request per complaint. **Measured:** the CFPB database received 5.4 million complaints in 2025 (about 15,000 a day) and 620,000–690,000 a month from March to September 2026 (about 21,000 a day). **Assumption:** intake runs 12 hours a day and the busiest minute is 5× the average rate.
 
 **What happens when they are wrong.** A misrouted complaint goes to a team that does not own it. That team has to notice, reassign it, and the clock on the regulatory response window (15 days for a first response under CFPB's process) keeps running. Systematic errors hurt more than random ones. If the model starts sending, say, new "buy now, pay later" complaints to the credit-card team, a whole category gets slow and nobody notices until labels come back.
 
 **Why a system and not a notebook.** Three things change over time and a notebook cannot follow them:
 
-- **The label space.** CFPB revised its product taxonomy in April 2017, merging and renaming categories. New products (virtual currency, BNPL) appear as complaints before they have their own category.
-- **The class mix.** Credit-reporting complaints grew from a minority to the large majority of volume in recent years. A model trained on old data has the wrong priors.
+- **The label space.** **Measured:** CFPB changed its product taxonomy twice, in April 2017 and in August 2023, and every change renamed or merged products (20 distinct product names map onto our 10 classes). A new class, *Debt or credit management*, appeared in August 2023. New products appear as complaints before they have their own category.
+- **The class mix.** **Measured:** credit reporting was 19% of narratives in 2016, 69% in 2022 and 77% in 2024, while yearly volume grew from 0.19 million (2016) to 5.4 million (2025). A model trained on old data has the wrong priors.
 - **The vocabulary.** New scams, new company names, new regulations.
 
 The system therefore needs scheduled ingestion, versioned data, tracked retraining, a promotion rule and monitoring that works before labels arrive. Those are what Labs 2 to 5 build.
@@ -70,8 +70,8 @@ One row per category, each with a number or an explicit assumption.
 
 | Category | Requirement |
 |---|---|
-| Freshness | New CFPB data is ingested daily and is ≤ 3 days old when used. Labels are joined to predictions 15 days after prediction (emulated delay, 5.2). The serving model is trained on data no older than 35 days at promotion time. |
-| Latency and throughput | p95 ≤ 300 ms and p99 ≤ 800 ms for `POST /predict` with narratives up to 10,000 characters. Sustains 20 req/s on one CPU replica, against an assumed peak need of about 1.2 req/s (10k/day × 10 ÷ 86,400). |
+| Freshness | The structured CFPB export is ingested daily and is ≤ 3 days old when used; text batches are replayed one month per run from the text snapshot (5.2). Labels are joined to predictions 15 days after prediction (emulated delay, 5.2). The serving model is trained on data no older than 35 days at promotion time. |
+| Latency and throughput | p95 ≤ 300 ms and p99 ≤ 800 ms for `POST /predict` with narratives up to 10,000 characters. Sustains 20 req/s on one CPU replica, against a peak need of about 2.5 req/s (21,000 a day over 12 intake hours, ×5 at peak). |
 | Availability and fallback | ≥ 99.5% during intake hours. **Fallback:** if the service errors or exceeds 2 s, the Triage desk sends the complaint to the manual queue, so routing is never blocked. If the model fails to load, readiness fails and the previous `@champion` version keeps serving. |
 | Reproducibility | Any registered model can be rebuilt from `(git commit, DVC data version, params)` with one command, and these three are logged on every MLflow run. Environment pinned by `uv.lock`; container images tagged with the commit (Lab 4). |
 | Adaptability | Monthly scheduled retraining, plus retraining triggered by drift alerts. Unknown product labels in a new batch are mapped through a versioned taxonomy table. An unmapped label fails the quality gate instead of silently becoming a new class. |
@@ -84,7 +84,7 @@ One row per category, each with a number or an explicit assumption.
 
 - Product-level routing (one label per complaint) from the narrative plus intake-form fields.
 - Batch ingestion of the public CFPB export, data versioning, quality gate, training, registry, online serving, monitoring and drift alerts.
-- An LLM component (Lab 3) that gives triage agents a short rationale for the routing, citing retrieved policy passages.
+- An LLM component (Lab 3): a zero-shot LLM classifier evaluated as a baseline against the trained model, and a retrieval-backed rationale for triage agents that cites Ask CFPB and regulation passages.
 - An agent (Lab 5) that can run the operational playbook: check drift, compare candidate with champion, draft a promotion note.
 
 ### Out of scope
@@ -99,57 +99,68 @@ One row per category, each with a number or an explicit assumption.
 
 ### 5.1 Problem statement
 
-**Framing:** single-label multiclass text classification. The input is the complaint narrative (plus optional form fields), and the output is one of the consolidated product classes:
+**Framing:** single-label multiclass text classification. The input is the complaint narrative (plus optional form fields), and the output is one of ten consolidated product classes (share of training-window narratives, **measured**):
 
-1. Credit reporting
-2. Debt collection
-3. Credit card
-4. Checking or savings account
-5. Mortgage
-6. Money transfer and virtual currency
-7. Vehicle loan or lease
-8. Student loan
-9. Payday, title and personal loan
-10. Prepaid card
+| # | Class | Share |
+|---|---|---|
+| 1 | Credit reporting | 74.2% |
+| 2 | Debt collection | 7.7% |
+| 3 | Credit or prepaid card | 5.0% |
+| 4 | Checking or savings | 4.4% |
+| 5 | Money transfer and virtual currency | 4.2% |
+| 6 | Mortgage | 1.6% |
+| 7 | Student loan | 1.1% |
+| 8 | Vehicle loan or lease | 1.0% |
+| 9 | Payday, title and personal loan | 0.6% |
+| 10 | Debt or credit management | 0.2% |
 
-"Consolidated" means the pre-2017 and post-2017 CFPB product names are mapped onto one stable set by a versioned taxonomy table (`taxonomy_map.csv`, Lab 2).
+"Consolidated" means the 20 product names CFPB used across its 2012, 2017 and 2023 taxonomies are mapped onto one stable set by the versioned table [`configs/taxonomy_map.csv`](../configs/taxonomy_map.csv). Credit card and prepaid card are one class because CFPB merged them from 2017 to 2023. 1,333 rows (0.008%) carry a product outside the map (`Other`, blank) and go to manual triage.
 
 **Rejected framing: issue-level routing.** CFPB's `Issue` field has many dozens of values, several of them shared across products and renamed between taxonomy versions. A flat classifier would be sparse in most classes and invalidated by every taxonomy change, and a hierarchical one doubles the evaluation surface before the simple system works. Product is what decides the owning team, so it is the decision that matters. Issue stays as a possible Lab 5+ extension.
 
 ### 5.2 Data
 
-**Source.** The CFPB [Consumer Complaint Database](https://www.consumerfinance.gov/data-research/consumer-complaints/), a full export at `https://files.consumerfinance.gov/ccdb/complaints.csv.zip`. It is public domain and re-published daily. Observed on 2026-10-12: 353 MB zipped, `last-modified` the same day.
+**Sources.** Two copies of the public CFPB [Consumer Complaint Database](https://www.consumerfinance.gov/data-research/consumer-complaints/):
 
-**Arrival pattern.** The whole history is re-exported daily, and rows can be amended after first publication. The ingestion task therefore reads the export and keeps rows whose `date_received` falls in the target interval, which makes the run idempotent per interval. Lab 2 ingests one calendar month per run, which lets it replay "the next month".
+| Source | What it has | Used for |
+|---|---|---|
+| **Text snapshot**: a Parquet mirror of the CFPB export taken 2026-07-06 ([Mouwiya/cfpb-consumer-complaints](https://huggingface.co/datasets/Mouwiya/cfpb-consumer-complaints) on Hugging Face, 67 files, 1.0 GB) | 16,558,052 complaints, 2011-12-01 → 2026-07-06; **3,815,251 with a narrative** | Training, validation, test and monthly replay |
+| **Official export**: `https://files.consumerfinance.gov/ccdb/complaints.csv.zip` (355 MB zipped, 5.6 GB CSV, downloaded 2026-10-17) | 18,486,121 complaints, refreshed daily, **no narrative column** | Daily structured ingestion: volumes, product mix, freshness checks |
+
+**Why two sources (measured, and the main data risk of this project).** CFPB stopped publishing narratives in 2026. In the snapshot the share of complaints with text fell from 26% (July 2025) to 11% (December 2025), 3% (April 2026) and 0% (July 2026). The current export no longer has the `Consumer complaint narrative` column, and CFPB's field reference (last modified 2026-09-14) no longer lists it. The text up to 2025 is therefore frozen. It is snapshotted into DVC on the first ingestion so the project never depends on the mirror staying online.
+
+**Arrival pattern.** The official export re-publishes the whole history daily, and rows can be amended. Ingestion keeps rows whose `date_received` falls in the target month and overwrites that month's partition, so a run is idempotent per month. For text, Lab 2 replays the snapshot one calendar month per run ("the next month"), which is the batch pattern the labs need.
+
+**Measured profile** (training window, details in [`docs/data-profile.md`](data-profile.md)): median narrative 644 characters / 107 words (p90 1,990 characters, p99 5,782); 62% of narratives contain CFPB's `XXXX` redaction; `Date sent to company` equals `Date received` for the median complaint (p99: 7 days).
 
 **Fields and serving-time availability.**
 
 | Field | Training | Serving | Note |
 |---|---|---|---|
-| `Consumer complaint narrative` | yes | yes (request body) | The main feature. Published only with consumer consent, from 2015-03-19 onwards. |
-| `Date received` | yes | yes | Used for the time split and for seasonality checks, not as a model feature. |
-| `Submitted via` | yes | yes | Web, phone, referral and so on. |
-| `State` | yes | yes | |
-| `Company` | yes | yes, but raw | CFPB normalizes company names and the intake form gets free text. This is a training/serving skew risk, see 5.3. |
-| `Product`, `Sub-product` | **label** | no | Arrives with the label (below). |
-| `Issue`, `Sub-issue` | no | no | Out of scope (5.1). |
-| `Company response to consumer`, `Timely response?`, `Company public response`, `Date sent to company`, `Consumer disputed?` | **excluded** | no | These are produced after routing. Using them would be target leakage. |
-| `ZIP code`, `Tags`, `Complaint ID` | ID only | yes | `Complaint ID` is the join key between prediction and label. |
+| `consumer_complaint_narrative` | yes | yes (request body) | The main feature. Published only with consumer consent, 2015-03 → 2025 in practice. |
+| `date_received` | yes | yes | Used for the time split and replay, not as a model feature. |
+| `submitted_via` | yes | yes | Web, phone, referral and so on. |
+| `state` | yes | yes | |
+| `company` | yes | yes, but raw | CFPB normalizes company names and the intake form gets free text. This is a training/serving skew risk, see 5.3. |
+| `product`, `sub_product` | **label** | no | Arrives with the label (below). |
+| `issue`, `sub_issue` | no | no | Out of scope (5.1). |
+| `company_response_to_consumer`, `timely_response`, `company_public_response`, `date_sent_to_company` | **excluded** | no | These are produced after routing. Using them would be target leakage. |
+| `zip_code`, `tags`, `complaint_id` | ID only | yes | `complaint_id` is the join key between prediction and label. |
 
-**Labels and their delay.** In the raw data, `Product` is chosen by the consumer on the form, so it exists at submission. This project emulates a desk where complaints arrive as free text (e-mail, phone transcripts) and the product is confirmed only when the owning team accepts the ticket. **Assumption:** the label arrives 15 days after the prediction, matching CFPB's 15-day company response window. The label release job joins `Product` to the prediction log only for complaints with `date_received ≤ today − 15 days`. Lab 4 monitors those 15 days without ground truth.
+**Labels and their delay.** In the raw data, `product` is chosen by the consumer on the form, so it exists at submission. This project emulates a desk where complaints arrive as free text (e-mail, phone transcripts) and the product is confirmed only when the owning team accepts the ticket. The delay is set to 15 days because that is CFPB's own publication rule: a complaint is published "after the company responds … or after 15 days, whichever comes first" (CFPB database page). The label release job joins `product` to the prediction log only for complaints with `date_received ≤ today − 15 days`. Lab 4 monitors those 15 days without ground truth.
 
-**Known label noise.** Consumers pick the wrong product sometimes. **Assumption:** about 5–10% noise. Lab 2 measures it by hand-labeling a sample of 200 and reports it next to the baseline.
+**Known label noise.** Consumers pick the wrong product sometimes. **Assumption:** about 5–10% noise. Lab 2 measures it by hand-labeling a sample of 200 and reports it next to the baseline. A stratified sample of 200 real rows (20 per class, January–June 2025) is already in [`data/sample/complaints_sample.csv`](../data/sample/complaints_sample.csv).
 
 **Checklist justification.**
 
 | Checklist item | Status | Justification |
 |---|---|---|
-| A time axis | ✅ | `Date received` is daily, from Dec 2011 to today. New batches arrive daily, so Lab 2 can ingest "the next month" and Lab 4 can replay months with real drift (taxonomy change in 2017, credit-reporting surge in recent years) instead of synthetic drift. |
-| Enough history to hold out a period | ✅ | Narratives cover 2015-03 to today, about 11.5 years. Plan: train on a rolling 24 months up to 2025-12, validate on 2026-01 to 2026-03, test on 2026-04 to 2026-06, and keep 2026-07 onwards as unseen "future" batches for Lab 2 replay and Lab 4 drift. Exact row counts are an **assumption** (millions per year with narratives) until the Lab 2 profile. |
-| Labels with a known arrival delay | ✅ (emulated) | 15 days, as above. The delay is a design assumption on top of real data, stated as such. |
+| A time axis | ✅ | `date_received` is daily from 2011-12 onwards. Lab 2 ingests "the next month" by replaying snapshot months; the official export keeps arriving daily for structured checks. Lab 4 replays months with real, measured drift: the August 2023 taxonomy change, the credit-reporting surge (0.8 million complaints in 2022, 5.4 million in 2025) and the narrative cut-off itself. Cost: no genuinely new text after 2025, so "new" text batches are replayed history. |
+| Enough history to hold out a period | ✅ | 3.8 million narratives over 2015-03 → 2025. Train on 24 months (2023-04 → 2025-03, 1,539,100 narratives), validate on 2025-04 → 2025-06 (324,620), test on 2025-07 → 2025-09 (316,072). 2025-10 onwards is the replay period for Labs 2 and 4. |
+| Labels with a known arrival delay | ✅ (emulated) | 15 days, grounded in CFPB's 15-day publication rule. The delay is a design choice on top of real data, stated as such. |
 | A text surface or a documented corpus | ✅ | The narratives are the data itself. For Lab 3 retrieval the corpus is (a) *Ask CFPB* consumer explainer articles (consumerfinance.gov/ask-cfpb) and (b) the eCFR text of the regulations that govern the products: Reg B (12 CFR 1002), Reg E (1005), Reg F (1006), Reg V (1022), Reg X (1024) and Reg Z (1026). Both are public. |
 
-**Formats.** Raw layer: the CSV exactly as downloaded, zipped, one snapshot per ingestion, never edited, so it can be re-parsed. Clean and features layers: Parquet partitioned by `month=YYYY-MM` (columnar, typed and about 5–10× smaller than CSV). Serving-side prediction and label logs: PostgreSQL tables, because they are appended one row at a time and joined by `complaint_id`.
+**Formats.** Raw layer: the CSV and Parquet files exactly as downloaded, one snapshot per ingestion, never edited, so they can be re-parsed. Clean and features layers: Parquet partitioned by `month=YYYY-MM` (columnar and typed; the 5.6 GB CSV becomes about 1 GB of Parquet). Serving-side prediction and label logs: PostgreSQL tables, because they are appended one row at a time and joined by `complaint_id`.
 
 ### 5.3 Techniques
 
@@ -173,7 +184,7 @@ CFPB replaces redacted personal data with `XXXX`. The preprocessing applies the 
 
 ### 5.4 Experimentation and validation
 
-**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train ≤ 2025-12, validation 2026-01 to 2026-03 (threshold and calibration), test 2026-04 to 2026-06 (reported once). For model comparison Lab 2 runs a rolling-origin backtest over the last three months, one fold per month.
+**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). For model comparison Lab 2 runs a rolling-origin backtest over the last three months, one fold per month.
 
 **Offline metrics.** Macro-F1 (optimizing), per-class recall, precision and coverage at the chosen threshold, and the confusion matrix logged as an artifact.
 
@@ -325,10 +336,10 @@ The local stack is pinned to the course reference. Cloud columns are what would 
 
 | Budget | Target | Basis |
 |---|---|---|
-| Expected load | ~0.12 req/s average, ~1.2 req/s peak | Assumption: 10k/day, 10× peak |
-| Design throughput | 20 req/s on one replica (1 CPU, 1 GB) | More than 15× headroom over peak. Verified with a load test in Lab 4. |
+| Expected load | ~0.5 req/s average in intake hours, ~2.5 req/s peak | Measured 21,000 complaints a day (2026); assumed 12 intake hours and 5× peak |
+| Design throughput | 20 req/s on one replica (1 CPU, 1 GB) | About 8× headroom over peak. Verified with a load test in Lab 4. |
 | p95 latency | ≤ 300 ms end to end at the service | Split: JSON parse + preprocess ≤ 20 ms, vectorize + predict ≤ 30 ms, logging ≤ 50 ms (async), the rest is headroom for the network and the cluster |
-| Lab 3 LLM rationale | Not on the routing path. Generated asynchronously for `manual` complaints only, p95 ≤ 10 s. | Keeps the LLM from ever blocking routing |
+| Lab 3 LLM rationale | Not on the routing path. Generated on demand when an agent opens a `manual` complaint, p95 ≤ 10 s. | Keeps the LLM from ever blocking routing |
 | Training | ≤ 30 min on a laptop CPU for 24 months of narratives | Assumption until Lab 2 measures it |
 
 ### 6.4 Security
@@ -351,7 +362,7 @@ First draft. Lab 4 implements it.
 |---|---|---|---|---|
 | Ingestion freshness | max(`date_received`) in the newest snapshot | older than today − 3 days | daily | ML on-call |
 | Ingestion idempotence | rows ingested for month M on re-run | differs from the previous run of M by > 0.5%, or **equal to the previous interval's count** (same partition read twice) | per run | ML on-call |
-| Quality gate | pandera failures, unmapped product labels, null-narrative rate | any failure, any unmapped label, null rate > 2× reference | per run | ML on-call (run fails) |
+| Quality gate | pandera failures, unmapped product labels, null-narrative rate | any failure, any unmapped label, share of rows with text below half of the reference month's. **Measured case:** the share fell from 26% (2025-07) to 11% (2025-12) and 0% (2026-07); against a 2025-07 reference this rule fires on 2025-12 | per run | ML on-call (run fails) |
 | Prediction drift | PSI of predicted class distribution vs reference month | > 0.2 | daily | ML on-call |
 | Input drift | OOV-token rate, median narrative length, `submitted_via` mix | OOV rate +50% relative to reference, or Evidently drift share > 30% | daily | ML on-call |
 | Confidence drift | mean max-probability; share routed `auto` | drop > 0.05; `auto` share < 50% | daily | ML on-call |
@@ -376,16 +387,17 @@ An estimate of the AWS column for one month in `us-east-1`. Nothing here is run.
 | Amazon CloudWatch | metrics, logs (< 10 GB), a few alarms | 15 |
 | SageMaker Model Monitor | replaced by Evidently as an EKS CronJob (already counted in EKS) | 0 |
 | OpenSearch Serverless (Lab 3) | minimum capacity units for a small vector collection | 175 |
-| Amazon Bedrock (Lab 3) | ~20% of 300k complaints/month get a rationale: 60k calls × (1.5k in + 200 out) tokens on a small model | 150 |
-| **Total** | | **≈ 900** |
+| Amazon Bedrock (Lab 3) | rationale on demand for ~10% of 630k complaints/month: 63k calls × (1.5k in + 200 out) tokens on a small model | 160 |
+| **Total** | | **≈ 905** |
 
-The total is above the $800 ceiling in section 4. The first lever is the vector store: pgvector inside the existing RDS instance instead of OpenSearch Serverless brings the total to about $720. That is the planned choice, to be confirmed in Lab 3. The most fragile assumption is the LLM call volume, which scales linearly with complaints and with the share routed manually.
+The total is above the $800 ceiling in section 4. The first lever is the vector store: pgvector inside the existing RDS instance instead of OpenSearch Serverless brings the total to about $730. That is the planned choice, to be confirmed in Lab 3. The most fragile assumption is the LLM call volume, which scales linearly with complaints and with the share routed manually.
 
 ### 6.8 Integration points
 
 | Party | Direction | Owner | Contract |
 |---|---|---|---|
-| CFPB Consumer Complaint Database | upstream data | CFPB (external, no SLA) | Daily full CSV export with the documented field set. We tolerate up to 3 days of staleness. A schema change is detected at the quality gate (column set and types) and fails the run without touching `features/`. |
+| CFPB Consumer Complaint Database | upstream data | CFPB (external, no SLA) | Daily full CSV export with the documented field set. We tolerate up to 3 days of staleness. A schema change is detected at the quality gate (column set and types) and fails the run without touching `features/`. **This contract already broke once:** the narrative column was dropped in 2026 (5.2). |
+| Text snapshot (Hugging Face mirror, 2026-07-06) | upstream data, one-off | third party; CFPB data is public domain | Pulled once and snapshotted into DVC; never re-read at run time. |
 | Intake channel | upstream requests | simulated (replay script) | Delivers complaints to the Triage desk with `complaint_id`, `narrative` and form fields. |
 | Triage desk | downstream consumer | intake desk (simulated) | Calls `POST /predict` per F1/F2 with a 2 s timeout. On error or timeout it falls back to the manual queue. Response fields are versioned and new fields are additive only. |
 | Routing outcomes (labels) | upstream labels | intake desk + CFPB | `complaint_id`, final `product`, `source ∈ {cfpb_delayed, human_override}` and timestamp, delivered ≥ 15 days after prediction. |
@@ -396,7 +408,8 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 
 | Risk | Mitigation |
 |---|---|
-| **The data source changes or disappears.** The export is free, has no SLA and depends on a public agency's continued operation. | Every ingested month is snapshotted to DVC, so the project can always rebuild from its own copy and replay stored months. |
+| **The data source changes or disappears.** This has happened: CFPB stopped publishing narratives in 2026, so no new text arrives. | Text comes from a 2026-07 snapshot, put into DVC once; months are replayed from it. The structured daily export still drives freshness and volume checks. If a model must see post-2025 text, the alternative is the API's live search or a different text source, decided before Lab 2 ends. |
+| **The text mirror is a third-party upload.** | Row counts and dates were cross-checked against the official export (16.6 M vs 18.5 M rows, the difference being complaints received after 2026-07-06). The DVC copy removes the runtime dependency. |
 | **Taxonomy change** (new or renamed products) silently creates a new class or merges two. | Versioned `taxonomy_map.csv`. An unmapped label fails the quality gate and alerts. |
 | **Label proxy is noisy.** The consumer-chosen product is not always the right team. | Measure noise on 200 hand-labeled rows in Lab 2. Agent overrides take precedence as labels. |
 | **Severe class imbalance** (credit reporting dominates). | Class weights, macro-F1 as the optimizing metric, per-class recall in the promotion rule. |
@@ -413,7 +426,7 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 |---|---|---|---|
 | **Feast online feature store** for company-level aggregates (for example a company's product mix over the last 90 days) | Real online/offline split, a richer signal, uses the reference stack | Needs a materialization job and an online store in a 4 GB cluster. Point-in-time correctness is extra work. The narrative already carries most of the signal. | **Rejected for v1.** Revisit if the Lab 2 error analysis shows the company signal matters. |
 | **Fine-tuned transformer** (for example DistilBERT) instead of TF-IDF + LR | Likely +3–8 pp macro-F1 and more robust to paraphrase | GPU or slow CPU training, more than 250 MB model, harder to meet 300 ms p95 on 1 CPU, slower retrain loop | **Rejected for v1.** It is the obvious challenger once the pipeline exists. |
-| **Zero-shot LLM as the primary classifier** | No training. Handles a new product by editing the prompt. | Per-call cost at 10k/day, latency in seconds, non-deterministic, hard to version against a label set | **Rejected as router.** Used in Lab 3 as a rationale assistant. |
+| **Zero-shot LLM as the primary classifier** | No training. Handles a new product by editing the prompt. | Per-call cost at 15,000–21,000 complaints a day, latency in seconds, non-deterministic, hard to version against a label set | **Rejected as router.** Evaluated in Lab 3 as the LLM baseline on a fixed sample of the test set, and used as a rationale assistant. |
 | **Kafka streaming ingestion** | Matches a real intake stream | The source is a daily batch export, so streaming adds infra with no freshness gain | **Rejected.** Serving is already online. Ingestion stays batch. |
 | **Different dataset:** HuffPost News Category for news classification | Clean, small, text-native | Ends in 2022, no label delay story, no natural owner/consumer | **Rejected** in favor of CFPB. |
 
@@ -430,6 +443,6 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 | Lab | What it adds to this system |
 |---|---|
 | 2 | Airflow DAG `ccdb_pipeline` ingests, versions (DVC on MinIO), validates (pandera gate) and trains both baselines and the TF-IDF + LR candidate with MLflow tracking, registering a `@challenger` with data version and commit. |
-| 3 | An LLM rationale component retrieves Ask CFPB and eCFR passages from pgvector and explains manual-queue routings, with an evaluation set, versioned prompts, and logged token cost and p50/p95 latency. |
+| 3 | A zero-shot LLM classifier is scored against the TF-IDF model on a fixed 1,000-complaint test sample (the LLM baseline), and a rationale component retrieves Ask CFPB and eCFR passages from pgvector to explain manual-queue routings, with versioned prompts and logged token cost and p50/p95 latency. |
 | 4 | `complaint-router-api` is containerized and deployed on Minikube with health probes, a nightly Evidently job and Prometheus/Grafana, and an injected drift (replaying a post-taxonomy-change month) reaches the ML on-call alert. |
 | 5 | An agent runs the operations playbook: reads drift reports, compares `@challenger` with `@champion` against the 5.4 rule and drafts a promotion note for the human approver, with traces and a ten-task evaluation. |
