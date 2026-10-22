@@ -5,6 +5,7 @@ export
 MONTHS_FROM ?= 2023-04-01
 MONTHS_TO   ?= 2025-09-01
 AF = docker compose exec -T airflow airflow
+CTL = docker compose exec -T airflow python /opt/project/scripts/airflow_ctl.py
 
 setup:
 	uv sync --locked
@@ -51,13 +52,13 @@ backfill:              ## one DAG run per month, MONTHS_FROM..MONTHS_TO (first d
 
 run-month:             ## rerun one month: make run-month MONTH=2024-06-01 [FAULT=null_narratives]
 	$(AF) dags unpause ccdb_pipeline >/dev/null
+	$(if $(FAULT),,$(CTL) reset-conf $(MONTH) >/dev/null)
 	$(AF) backfill create --dag-id ccdb_pipeline --from-date $(MONTH) --to-date $(MONTH) \
 		--reprocess-behavior completed $(if $(FAULT),--dag-run-conf '{"fault": "$(FAULT)"}') >/dev/null
 	@$(MAKE) -s wait
 
-wait:                  ## block until no ccdb_pipeline run is queued or running
-	@while $(AF) dags list-runs ccdb_pipeline -o plain 2>/dev/null | grep -Eq "\b(queued|running)\b"; do sleep 5; done
-	@echo "all runs finished"
+wait:                  ## block until the newest backfill completes, then print each run's state
+	@$(CTL) wait-backfill
 
 counts:                ## row counts per layer for MONTH
 	docker compose exec -T postgres psql -U complaints -d warehouse -c "select 'raw' as layer, count(*) from raw.complaints where batch_month='$(MONTH)' union all select 'dwh', count(*) from dwh.complaints where batch_month='$(MONTH)' union all select 'features', count(*) from features.complaint_features where batch_month='$(MONTH)'"
