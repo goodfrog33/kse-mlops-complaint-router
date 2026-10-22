@@ -5,8 +5,8 @@ Routing consumer financial complaints to the right product queue, with a system 
 | | |
 |---|---|
 | Author | Zakhar Staryk |
-| Status | Lab 1 draft (design only, no pipeline yet) |
-| Last revised | 2026-10-17 (data profiled; source switched to a text snapshot, see 5.2) |
+| Status | Lab 2: pipeline, versioning, tracking and registry built; results in 7.2 |
+| Last revised | 2026-10-22 (Lab 2) |
 | Later revisions | Lab 2: 5.2, 5.4, 6.1, 7.2 · Lab 3: 5.3, 6.2, 6.7 · Lab 4: 6.1 (deployment), 6.3, 6.6, 7.3 · Lab 5: 6.8, 7.4 |
 
 Statements marked **Assumption:** are decisions taken without evidence yet. Each one names the lab that will confirm or replace it. Statements marked **Measured:** come from `scripts/profile_data.py`; the full numbers are in [`docs/data-profile.md`](data-profile.md).
@@ -160,7 +160,7 @@ One row per category, each with a number or an explicit assumption.
 
 **Labels and their delay.** In the raw data, `product` is chosen by the consumer on the form, so it exists at submission. This project emulates a desk where complaints arrive as free text (e-mail, phone transcripts) and the product is confirmed only when the owning team accepts the ticket. The delay is set to 15 days because that is CFPB's own publication rule: a complaint is published "after the company responds … or after 15 days, whichever comes first" (CFPB database page). The label release job joins `product` to the prediction log only for complaints with `date_received ≤ today − 15 days`. Lab 4 monitors those 15 days without ground truth.
 
-**Known label noise.** Consumers pick the wrong product sometimes. **Assumption:** about 5–10% noise. Lab 2 measures it by hand-labeling a sample of 200 and reports it next to the baseline. A stratified sample of 200 real rows (20 per class, January–June 2025) is already in [`data/sample/complaints_sample.csv`](../data/sample/complaints_sample.csv).
+**Known label noise.** Consumers pick the wrong product sometimes. **Assumption:** about 5–10% noise. The hand-labeling of 200 rows planned for Lab 2 was **not done**; it moves to Lab 3, where an LLM can draft labels for a human to check. A stratified sample of 200 real rows (20 per class, January–June 2025) is already in [`data/sample/complaints_sample.csv`](../data/sample/complaints_sample.csv).
 
 **Checklist justification.**
 
@@ -206,9 +206,9 @@ CFPB replaces redacted personal data with `XXXX`; `clean_text` applies the same 
 
 ### 5.4 Experimentation and validation
 
-**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). For model comparison Lab 2 runs a rolling-origin backtest over the last three months, one fold per month.
+**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). On the Lab 2 sample this gives 23,918 / 2,377 / 1,933 texts. The rolling-origin backtest is **not done in Lab 2** (one fixed split only); it moves to the challenger comparison in Lab 4.
 
-**Offline metrics.** Macro-F1 (optimizing), per-class recall, precision and coverage at the chosen threshold, and the confusion matrix logged as an artifact.
+**Offline metrics.** Macro-F1 (optimizing), accuracy, macro recall, and coverage and precision at the chosen threshold; per-class F1 and precision are logged as `per_class_test.json`. For scoring, the keyword rule's "no match" falls back to the majority class, so every complaint gets a label.
 
 **Comparing a new model with the current one.** Champion and challenger are scored on the same most recent labeled month. The challenger becomes a promotion candidate only if all of these hold:
 
@@ -430,7 +430,7 @@ Host ports avoid 5000, 5432 and 9000, which are often taken.
 | Design throughput | 20 req/s on one replica (1 CPU, 1 GB) | About 8× headroom over peak. Verified with a load test in Lab 4. |
 | p95 latency | ≤ 300 ms end to end at the service | Split: JSON parse + preprocess ≤ 20 ms, vectorize + predict ≤ 30 ms, logging ≤ 50 ms (async), the rest is headroom for the network and the cluster |
 | Lab 3 LLM rationale | Not on the routing path. Generated on demand when an agent opens a `manual` complaint, p95 ≤ 10 s. | Keeps the LLM from ever blocking routing |
-| Training | ≤ 30 min on a laptop CPU for 24 months of narratives | Assumption until Lab 2 measures it |
+| Training | ≤ 30 min on a laptop CPU for 24 months of narratives | **Measured in Lab 2:** about 5 min for the TF-IDF model on 23,918 texts (Apple M-series CPU), most of it in the character n-grams |
 
 ### 6.4 Security
 
@@ -506,7 +506,7 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 | **The data source changes or disappears.** This has happened: CFPB stopped publishing narratives in 2026, so no new text arrives. | Text comes from a 2026-07 snapshot, put into DVC once; months are replayed from it. The structured daily export still drives freshness and volume checks. If a model must see post-2025 text, the alternative is the API's live search or a different text source, decided before Lab 2 ends. |
 | **The text mirror is a third-party upload.** | Row counts and dates were cross-checked against the official export (16.6 M vs 18.5 M rows, the difference being complaints received after 2026-07-06). The DVC copy removes the runtime dependency. |
 | **Taxonomy change** (new or renamed products) silently creates a new class or merges two. | Versioned `taxonomy_map.csv`. An unmapped label fails the quality gate and alerts. |
-| **Label proxy is noisy.** The consumer-chosen product is not always the right team. | Measure noise on 200 hand-labeled rows in Lab 2. Agent overrides take precedence as labels. |
+| **Label proxy is noisy.** The consumer-chosen product is not always the right team. | Measure noise on 200 hand-labeled rows in Lab 3 (moved from Lab 2). Agent overrides take precedence as labels. |
 | **Severe class imbalance** (credit reporting dominates). | Class weights, macro-F1 as the optimizing metric, per-class recall in the promotion rule. |
 | **Selection bias:** narratives exist only for consenting consumers. | State it as a known limit. Complaints without a narrative go to manual triage (out of scope). |
 | **Training/serving skew** in company names and PII masking. | `preprocess()` ships inside the model artifact. Unmatched-alias rate is monitored (6.6). |
@@ -527,7 +527,25 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 
 ### 7.2 Data pipeline and experiment results
 
-*Placeholder. Lab 2 fills this in: data profile (rows per month, narrative share, class mix), label-noise measurement, baseline vs candidate scores, MLflow run links.*
+Filled in Lab 2 from the MLflow server (experiment `complaint-router`) and the warehouse.
+
+**Pipeline.** 39 monthly runs over data version `0319edfe2ad83a39d4d8241602a462f8`: 32 succeed, 7 fail `quality_check` on text share (2025-12: 0.100, then 0.036, 0.028, 0.030, 0.038, 0.010, 0.002 in 2026-06). Over the 30 training-window months, cleaning masked PII in 14,279 narratives, found 61,772 complaints without text, 0 duplicate ids and 0 unmapped products. A rerun of 2024-06 gives identical rows (3000 / 3000 / 1013) and an identical content hash.
+
+**Models** (test = 2025-07 .. 2025-09, 1,933 texts):
+
+| Model | MLflow run | Val macro-F1 | Test macro-F1 | Test accuracy |
+|---|---|---:|---:|---:|
+| Majority class | `majority-class` | 0.089 | 0.089 | 0.797 |
+| Keyword rule | `keyword-rule` | 0.392 | 0.384 | 0.712 |
+| TF-IDF + logistic regression (registered v2, `@champion`) | `tfidf-logreg` `9523c18b…` | 0.591 | **0.638** | **0.876** |
+
+At the validation-chosen threshold 0.77, 77.0% of test complaints are auto-routed with 0.948 precision: just under the 0.95 target of §3, against the 60% coverage target.
+
+**Per class (test F1 / precision):** Credit reporting 0.94 / 0.96 · Mortgage 0.84 / 0.80 · Vehicle loan or lease 0.77 / 0.71 · Money transfer and virtual currency 0.75 / 0.90 · Checking or savings 0.73 / 0.67 · Debt collection 0.64 / 0.60 · Payday, title and personal loan 0.60 / 0.60 · Student loan 0.59 / 0.57 · Credit or prepaid card 0.52 / 0.45 · Debt or credit management 0.00 / 0.00.
+
+**Reading.** The model beats both rules, and the rule beats the majority class, so the ordering is the expected one. Macro-F1 0.638 is below the 0.80 target: the smallest class (≈ 50 training texts in the sample) is never predicted, and card complaints are confused with credit reporting and debt collection, the same overlap the label-noise examples show. Levers for later labs: more rows per month for the small classes, calibration, and the LLM baseline of Lab 3.
+
+**Lineage check.** `make reproduce` retrained v2 from its tags in a clean worktree: 0.6378 registered, 0.6378 reproduced (tolerance 0.005).
 
 ### 7.3 Serving and monitoring results
 
@@ -537,7 +555,7 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 
 | Lab | What it adds to this system |
 |---|---|
-| 2 | Airflow DAG `ccdb_pipeline` ingests, versions (DVC on MinIO), validates (quality gate) and trains both baselines and the TF-IDF + LR candidate with MLflow tracking, registering a `@challenger` with data version and commit. |
+| 2 | **Done.** Airflow DAG `ccdb_pipeline` ingests the DVC-versioned sample month by month with two quality gates; both rule baselines and the TF-IDF + LR model are tracked in MLflow, and v2 is registered as `@champion` with data version and commit (7.2). |
 | 3 | A zero-shot LLM classifier is scored against the TF-IDF model on a fixed 1,000-complaint test sample (the LLM baseline), and a rationale component retrieves Ask CFPB and eCFR passages from pgvector to explain manual-queue routings, with versioned prompts and logged token cost and p50/p95 latency. |
 | 4 | `complaint-router-api` is containerized and deployed on Minikube with health probes, a nightly Evidently job and Prometheus/Grafana, and an injected drift (replaying a post-taxonomy-change month) reaches the ML on-call alert. |
 | 5 | An agent runs the operations playbook: reads drift reports, compares `@challenger` with `@champion` against the 5.4 rule and drafts a promotion note for the human approver, with traces and a ten-task evaluation. |
