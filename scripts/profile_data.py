@@ -114,9 +114,7 @@ def main() -> None:
     sent_delay = (
         df.filter(in_window(TRAIN))
         .select(
-            (pl.col("date_sent_to_company") - pl.col("date_received"))
-            .dt.total_days()
-            .alias("days")
+            (pl.col("date_sent_to_company") - pl.col("date_received")).dt.total_days().alias("days")
         )
         .drop_nulls()
     )

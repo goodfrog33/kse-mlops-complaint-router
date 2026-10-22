@@ -1,0 +1,7 @@
+[core]
+    remote = minio
+['remote "minio"']
+    url = s3://dvc/complaint-router
+    endpointurl = http://localhost:9100
+['remote "public"']
+    url = https://raw.githubusercontent.com/goodfrog33/kse-mlops-complaint-router/dvc-store

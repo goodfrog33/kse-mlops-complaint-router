@@ -8,3 +8,4 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: make setup
       - run: make lint
+      - run: make test

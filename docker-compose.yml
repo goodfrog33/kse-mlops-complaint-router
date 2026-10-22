@@ -1,0 +1,81 @@
+# Local stack for complaint-router (Lab 2). Host ports avoid the common defaults.
+name: complaint-router
+
+x-airflow-env: &airflow-env
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+  AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+  AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
+  AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
+  PYTHONPATH: /opt/project/src
+  PROJECT_ROOT: /opt/project
+  WAREHOUSE_DSN: postgresql://complaints:complaints@postgres:5432/warehouse
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports: ["5442:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 20
+
+  minio:
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports: ["9100:9000", "9101:9001"]
+    volumes: [miniodata:/data]
+
+  minio-init:
+    image: amazon/aws-cli:2.38.3
+    depends_on: [minio]
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until aws --endpoint-url http://minio:9000 s3 ls >/dev/null 2>&1; do sleep 1; done
+        for b in dvc mlflow; do aws --endpoint-url http://minio:9000 s3 mb s3://$$b 2>/dev/null || true; done
+        aws --endpoint-url http://minio:9000 s3 ls
+
+  mlflow:
+    build: {context: ., dockerfile: docker/mlflow.Dockerfile}
+    image: complaint-router/mlflow:3.16.1
+    depends_on:
+      postgres: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
+      --artifacts-destination s3://mlflow --serve-artifacts
+      --allowed-hosts "localhost:5050,127.0.0.1:5050,mlflow:5000,localhost,127.0.0.1"
+    ports: ["5050:5000"]
+
+  airflow:
+    build: {context: ., dockerfile: docker/airflow.Dockerfile}
+    image: complaint-router/airflow:3.3.1
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment: *airflow-env
+    command: standalone
+    ports: ["8080:8080"]
+    volumes: [".:/opt/project"]
+
+volumes:
+  pgdata:
+  miniodata:

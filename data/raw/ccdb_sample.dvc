@@ -1,0 +1,6 @@
+outs:
+- md5: 3e2aa70e51a3381389cbb8e05b5d7fa3.dir
+  size: 66264965
+  nfiles: 39
+  hash: md5
+  path: ccdb_sample
