@@ -133,7 +133,7 @@ One row per category, each with a number or an explicit assumption.
 |---|---|
 | Raw dataset | `data/raw/ccdb_sample/YYYY-MM.csv`, 39 files, 2023-04 → 2026-06, 3,000 complaints per month (117,000 rows, 66 MB), columns exactly as published |
 | How it is drawn | [`scripts/make_sample.py`](../scripts/make_sample.py): per month, the 3,000 complaints with the smallest Knuth hash of `complaint_id`. Uniform, deterministic, byte-identical on rerun. All complaints are kept, with or without text, so each month's real text share survives. |
-| Batch grain | one calendar month = one DAG run, keyed on `data_interval_start` |
+| Batch grain | one calendar month = one DAG run, keyed on `data_interval_start`; up to 6 months run concurrently (all 39 in about 2 minutes). With overlapping runs the `ids_seen_in_previous_month` check sees the previous month only if it has already loaded, so it is weaker during a backfill than on the monthly schedule. |
 | Data version identifier | the DVC directory hash in [`data/raw/ccdb_sample.dvc`](../data/raw/ccdb_sample.dvc): **`0319edfe2ad83a39d4d8241602a462f8`**. Every warehouse row, quality result and MLflow run carries it. |
 | DVC remotes | `minio` (default): `s3://dvc/complaint-router` on the local MinIO; `public`: a read-only HTTP mirror on the repository's `dvc-store` branch, so a reviewer can pull without credentials |
 | Label delay | 15 days after `date_received` (emulated, see below) |
@@ -206,7 +206,7 @@ CFPB replaces redacted personal data with `XXXX`; `clean_text` applies the same 
 
 ### 5.4 Experimentation and validation
 
-**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). On the Lab 2 sample this gives 23,918 / 2,377 / 1,933 texts. The rolling-origin backtest is **not done in Lab 2** (one fixed split only); it moves to the challenger comparison in Lab 4.
+**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). On the Lab 2 sample this gives 23,918 / 2,377 / 1,933 texts. A rolling-origin backtest (`make backtest`, 3 folds, each training on the 24 months before its test month) gives model macro-F1 0.684 ± 0.026 against the rule's 0.385 ± 0.014 (7.2).
 
 **Offline metrics.** Macro-F1 (optimizing), accuracy, macro recall, and coverage and precision at the chosen threshold; per-class F1 and precision are logged as `per_class_test.json`. For scoring, the keyword rule's "no match" falls back to the majority class, so every complaint gets a label.
 
@@ -411,7 +411,7 @@ Host ports avoid 5000, 5432 and 9000, which are often taken.
 | Database | MLflow backend, `prediction_log`, `label_log` | PostgreSQL 16 | Amazon RDS for PostgreSQL | Cloud SQL | Azure Database for PostgreSQL |
 | Orchestrator | DAG `ccdb_pipeline`: one month per run, extract → validate → transform → load → build_features → quality_check | Apache Airflow 3.3.1, LocalExecutor | Amazon MWAA | Cloud Composer | Azure Data Factory |
 | Experiment tracking and registry | Runs, `@champion` / `@challenger` aliases | MLflow 3.16.1 (Postgres backend, MinIO artifacts) | SageMaker with MLflow | Vertex AI Experiments + Model Registry | Azure ML with MLflow |
-| Feature store | Offline only: the Postgres table `features.complaint_features` with `feature_version`. Feast 0.66.0 **not used in v1** (7.1). | — | (SageMaker Feature Store, not used) | (Vertex AI Feature Store, not used) | (Azure ML feature store, not used) |
+| Feature store | Model features: the Postgres table `features.complaint_features` with `feature_version`. Feast 0.66.0 (`feature_repo/`, file offline store, SQLite online store) serves the company aggregates of the optional point-in-time demo; the v1 model does not use them. | — | (SageMaker Feature Store, not used) | (Vertex AI Feature Store, not used) | (Azure ML feature store, not used) |
 | Model service | `complaint-router-api` (FastAPI) | Docker image → Minikube | Amazon EKS | GKE | AKS |
 | Container registry | Images tagged with commit | Minikube built-in registry | Amazon ECR | Artifact Registry | Azure Container Registry |
 | Kubernetes cluster | Runs services in Lab 4 | Minikube 1.33.1 (K8s 1.30.0, docker driver, 4 GB) | Amazon EKS | GKE | AKS |
@@ -519,7 +519,7 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 
 | Alternative | Pros | Cons | Decision |
 |---|---|---|---|
-| **Feast online feature store** for company-level aggregates (for example a company's product mix over the last 90 days) | Real online/offline split, a richer signal, uses the reference stack | Needs a materialization job and an online store in a 4 GB cluster. Point-in-time correctness is extra work. The narrative already carries most of the signal. | **Rejected for v1.** Revisit if the Lab 2 error analysis shows the company signal matters. |
+| **Feast online feature store** for company-level aggregates (for example a company's product mix over the last 90 days) | Real online/offline split, a richer signal, uses the reference stack | Needs a materialization job and an online store in a 4 GB cluster. The narrative already carries most of the signal. | **Built, not used by the model.** Lab 2 defines `company_monthly_stats` and proves the point-in-time join (`make feast-demo`); whether the model uses it is decided by error analysis, not yet done. |
 | **Fine-tuned transformer** (for example DistilBERT) instead of TF-IDF + LR | Likely +3–8 pp macro-F1 and more robust to paraphrase | GPU or slow CPU training, more than 250 MB model, harder to meet 300 ms p95 on 1 CPU, slower retrain loop | **Rejected for v1.** It is the obvious challenger once the pipeline exists. |
 | **Zero-shot LLM as the primary classifier** | No training. Handles a new product by editing the prompt. | Per-call cost at 15,000–21,000 complaints a day, latency in seconds, non-deterministic, hard to version against a label set | **Rejected as router.** Evaluated in Lab 3 as the LLM baseline on a fixed sample of the test set, and used as a rationale assistant. |
 | **Kafka streaming ingestion** | Matches a real intake stream | The source is a daily batch export, so streaming adds infra with no freshness gain | **Rejected.** Serving is already online. Ingestion stays batch. |
@@ -544,6 +544,10 @@ At the validation-chosen threshold 0.77, 77.0% of test complaints are auto-route
 **Per class (test F1 / precision):** Credit reporting 0.94 / 0.96 · Mortgage 0.84 / 0.80 · Vehicle loan or lease 0.77 / 0.71 · Money transfer and virtual currency 0.75 / 0.90 · Checking or savings 0.73 / 0.67 · Debt collection 0.64 / 0.60 · Payday, title and personal loan 0.60 / 0.60 · Student loan 0.59 / 0.57 · Credit or prepaid card 0.52 / 0.45 · Debt or credit management 0.00 / 0.00.
 
 **Reading.** The model beats both rules, and the rule beats the majority class, so the ordering is the expected one. Macro-F1 0.638 is below the 0.80 target: the smallest class (≈ 50 training texts in the sample) is never predicted, and card complaints are confused with credit reporting and debt collection, the same overlap the label-noise examples show. Levers for later labs: more rows per month for the small classes, calibration, and the LLM baseline of Lab 3.
+
+**Backtest** (parent run `backtest-rolling-origin`): 2025-07 0.652, 2025-08 0.682, 2025-09 0.716 (model) against 0.374, 0.377, 0.405 (rule). Training right up to the test month adds about 0.045 over the registered model, which stops three months earlier for validation.
+
+**Random split** (run `random-split-leaky`, tag `split=random`): 0.591, below the time split's 0.638. On this uniform 0.5% sample, same-event complaints rarely co-occur, so random-split leakage does not show; the gap is within the backtest's month-to-month spread.
 
 **Lineage check.** `make reproduce` retrained v2 from its tags in a clean worktree: 0.6378 registered, 0.6378 reproduced (tolerance 0.005).
 

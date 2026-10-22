@@ -12,6 +12,7 @@ A complaint intake desk receives fifteen to twenty thousand free-text consumer c
 | Presentation (Lab 1) | [`docs/presentation/complaint-router-lab1.pptx`](docs/presentation/complaint-router-lab1.pptx) ([PDF](docs/presentation/complaint-router-lab1.pdf)) |
 | Data profile | [`docs/data-profile.md`](docs/data-profile.md) |
 | Label map | [`configs/taxonomy_map.csv`](configs/taxonomy_map.csv): 20 CFPB product names → 10 classes |
+| Lab 2 defense notes (Ukrainian) | [`docs/defense/lab2-qa.md`](docs/defense/lab2-qa.md): the 20 questions of Appendix 2, answered from this repository |
 
 ## Run it from a clean clone
 
@@ -22,9 +23,11 @@ make setup        # pinned Python environment from uv.lock + pre-commit hook
 make up           # Postgres, MinIO, MLflow and Airflow in Docker (creates .env from .env.example)
 make data-seed    # fill your empty MinIO from the public mirror (once)
 make data         # dvc pull the raw data from MinIO
-make backfill     # one Airflow run per month, 2023-04 .. 2025-09 (about 45 s per month)
+make backfill     # one Airflow run per month, 2023-04 .. 2025-09 (about 2 minutes)
 make train        # rule baselines + TF-IDF model, logged and registered as @champion
 make reproduce    # rebuild the @champion run from its commit and data version
+make backtest     # optional: rolling-origin backtest, 3 monthly folds
+make feast-demo   # optional: Feast point-in-time join + online read
 ```
 
 | Service | URL |
@@ -58,6 +61,8 @@ The full CFPB export is 5.6 GB, so the pipeline works on a sample, drawn by [`sc
 [`dags/ccdb_pipeline.py`](dags/ccdb_pipeline.py), Airflow 3.3.1: `extract → validate → transform → load → build_features → quality_check`. The code lives in [`src/complaint_router/pipeline.py`](src/complaint_router/pipeline.py).
 
 **The batch is the data interval, never the clock.** Airflow 3 no longer creates intervals for `@monthly`, so the DAG declares them: `schedule=CronDataIntervalTimetable("@monthly", timezone="UTC")`. Every task takes its month from `data_interval_start`. Backfill run `2024-06-01` processes June 2024 whenever it executes.
+
+**Concurrency.** Up to 6 months run at once (`max_active_runs=6`): every write is scoped to its own month, so runs do not touch each other's rows. All 39 months take 113 s (they took about 30 minutes one at a time), with the same 32 / 7 outcome and the same rows.
 
 **Idempotent loads.** Every layer is written with `delete from <table> where batch_month = %s` followed by `COPY` of the month, in one transaction (`replace_month`). The same month run twice:
 
@@ -93,7 +98,20 @@ A clean rerun of the same month succeeds (Airflow keeps a run's old conf on repr
 
 ## Features (step 4)
 
-`build_features` fills `features.complaint_features`: one row per complaint with text and a mapped label, plus `feature_version = v1` and `data_version`. Where each feature comes from at serving time is in design.md §5.3; `company` was dropped because its training and serving sources differ. The optional Feast part was not done.
+`build_features` fills `features.complaint_features`: one row per complaint with text and a mapped label, plus `feature_version = v1` and `data_version`. Where each feature comes from at serving time is in design.md §5.3; `company` was dropped from the model because its training and serving sources differ.
+
+**Feast (optional part).** [`feature_repo/`](feature_repo/) defines the entity `company` and the feature view `company_monthly_stats` (complaints, credit-reporting share and text share of the company's *previous* month), built from `dwh.complaints`. A month's statistics only exist once the month is over, so each row is stamped with the first day of the next month. `make feast-demo` applies the repo, asks for complaints dated 2024-07-15, between the 2024-07-01 and 2024-08-01 rows, and fails unless every entity gets the earlier row:
+
+```text
+entity rows: complaint on 2024-07-15; feature rows exist at 2024-07-01 and 2024-08-01
+  ALLY FINANCIAL INC.                    got    3  earlier row    3  later row    5  -> earlier
+  AMERICAN EXPRESS COMPANY               got    6  earlier row    6  later row    8  -> earlier
+  Affirm Holdings, Inc                   got    4  earlier row    4  later row    3  -> earlier
+online store, ALLY FINANCIAL INC.: complaints_last_month = 5 (latest row before 2024-08-02)
+point-in-time join: OK
+```
+
+The same definitions are materialized into the SQLite online store and read back with `get_online_features`, which is the path Lab 4 serving can use.
 
 ## Baseline vs model (step 5)
 
@@ -106,6 +124,19 @@ Time split (design.md §5.4): train 2023-04 .. 2025-03 (23,918 texts), validatio
 | **TF-IDF + logistic regression** | **0.638** | **0.876** | at threshold 0.77 (set on validation): 77% auto-routed at 0.948 precision |
 
 The model beats the rule on every metric. It misses the 0.80 macro-F1 target of design.md §3, mostly because *Debt or credit management* (0.2% of data) gets F1 0.00 and *Credit or prepaid card* 0.52. Per-class scores are in design.md §7.2.
+
+**Rolling-origin backtest** (`make backtest`; each fold trains on the 24 months right before its test month):
+
+| Test month | Model macro-F1 | Rule macro-F1 |
+|---|---:|---:|
+| 2025-07 | 0.652 | 0.374 |
+| 2025-08 | 0.682 | 0.377 |
+| 2025-09 | 0.716 | 0.405 |
+| mean ± std | **0.684 ± 0.026** | 0.385 ± 0.014 |
+
+The model wins every fold. Folds score higher than the registered model (0.638) because they train up to the month before the test, while the registered model stops three months earlier for validation: freshness is worth about 0.045 macro-F1, an argument for monthly retraining.
+
+**Random split, for comparison** (`scripts/random_split_check.py`, run tagged `split=random`): 0.591 macro-F1, *lower* than the time split. On this uniform 0.5% sample, complaints about one event rarely land together, so the leakage a random split usually causes does not show; the difference is within the month-to-month spread above. The time split stays because it is the only one that matches use.
 
 ## Tracking and registry (step 6)
 
@@ -126,7 +157,11 @@ The tolerance of **0.005 macro-F1** covers BLAS and thread-count differences acr
 
 ## Tests and CI
 
-`make test` runs [`tests/`](tests/): the polars and Python cleaning functions give identical output (the training/serving contract), the faults break the batch, rule baselines and the month range. CI runs `make setup`, `make lint` and `make test` on every push.
+`make test` runs the unit tests in [`tests/`](tests/): the polars and Python cleaning functions give identical output (the training/serving contract), the faults break the batch, rule baselines and the month range.
+
+`make test-integration` runs [`tests/test_pipeline_integration.py`](tests/test_pipeline_integration.py) against a real Postgres: a month run twice leaves identical rows and content hash; `null_narratives` and `wrong_month` faults raise `QualityGateError`; a clean rerun recovers.
+
+CI has two jobs on every push: `lint` (`make setup`, `make lint`, `make test`) and `pipeline`, which starts a Postgres service, pulls the raw data through DVC from the public remote (`make data-public`: *40 files fetched and 39 files added*) and runs `make test-integration` (*2 passed*). So a third party pulls the data and runs the pipeline on every push.
 
 ## Maturity scorecard
 
