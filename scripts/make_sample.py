@@ -7,7 +7,8 @@ pipeline works on a sample:
 * months 2023-04 .. 2026-06 (39 monthly batches),
 * per month, the 3,000 complaints with the smallest value of a fixed integer hash of
   ``complaint_id`` (Knuth multiplicative hash). This is a uniform random sample that is
-  deterministic, independent of row order and stable across library versions,
+  deterministic, independent of row order and stable across library versions (rows with
+  no complaint_id, 0.09% of 2026-05 upstream, sort last and so are effectively excluded),
 * all complaints, with or without narrative, so the share of text per month is the real one,
 * rows written as CSV, one file per month, sorted by ``complaint_id``, columns as published.
 
@@ -69,7 +70,9 @@ def main() -> None:
         f.unlink()
     for (month,), part in df.group_by("month"):
         sample = (
-            part.sort("key", "complaint_id")
+            # nulls_last: rows without a complaint_id have no hash; sorting them first would
+            # put every one of them into the sample instead of a proportional share.
+            part.sort("key", "complaint_id", nulls_last=True)
             .head(PER_MONTH)
             .sort(pl.col("complaint_id").cast(pl.UInt64))
         )

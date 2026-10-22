@@ -134,7 +134,7 @@ One row per category, each with a number or an explicit assumption.
 | Raw dataset | `data/raw/ccdb_sample/YYYY-MM.csv`, 39 files, 2023-04 → 2026-06, 3,000 complaints per month (117,000 rows, 66 MB), columns exactly as published |
 | How it is drawn | [`scripts/make_sample.py`](../scripts/make_sample.py): per month, the 3,000 complaints with the smallest Knuth hash of `complaint_id`. Uniform, deterministic, byte-identical on rerun. All complaints are kept, with or without text, so each month's real text share survives. |
 | Batch grain | one calendar month = one DAG run, keyed on `data_interval_start` |
-| Data version identifier | the DVC directory hash in [`data/raw/ccdb_sample.dvc`](../data/raw/ccdb_sample.dvc): **`3e2aa70e51a3381389cbb8e05b5d7fa3`**. Every warehouse row, quality result and MLflow run carries it. |
+| Data version identifier | the DVC directory hash in [`data/raw/ccdb_sample.dvc`](../data/raw/ccdb_sample.dvc): **`0319edfe2ad83a39d4d8241602a462f8`**. Every warehouse row, quality result and MLflow run carries it. |
 | DVC remotes | `minio` (default): `s3://dvc/complaint-router` on the local MinIO; `public`: a read-only HTTP mirror on the repository's `dvc-store` branch, so a reviewer can pull without credentials |
 | Label delay | 15 days after `date_received` (emulated, see below) |
 
@@ -315,7 +315,7 @@ Layer 3 has no online feature store on purpose. Every v1 feature is computed fro
 flowchart LR
     REM(("DVC remote<br/>MinIO s3://dvc<br/>+ public mirror"))
     subgraph RAW["Raw"]
-        R1["ccdb_sample/YYYY-MM.csv<br/>+ md5 3e2aa70e…"]
+        R1["ccdb_sample/YYYY-MM.csv<br/>+ md5 0319edfe…"]
         R2["raw.complaints<br/>(text columns)"]
     end
     subgraph CLEAN["Clean"]
@@ -490,7 +490,7 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 |---|---|---|---|
 | CFPB Consumer Complaint Database | upstream data | CFPB (external, no SLA) | Daily full CSV export with the documented field set. We tolerate up to 3 days of staleness. A schema change is detected at the quality gate (column set and types) and fails the run without touching `features/`. **This contract already broke once:** the narrative column was dropped in 2026 (5.2). |
 | Text snapshot (Hugging Face mirror, 2026-07-06) | upstream data, one-off | third party; CFPB data is public domain | Read once by `scripts/make_sample.py`; the sample is versioned in DVC and the pipeline never reads the mirror. |
-| DVC remotes (`minio`, `public`) | upstream data for the pipeline | this project | `data/raw/ccdb_sample.dvc` pins hash `3e2aa70e…`; `dvc pull` restores exactly those 39 files. A month file with the wrong columns or dates fails `validate`. |
+| DVC remotes (`minio`, `public`) | upstream data for the pipeline | this project | `data/raw/ccdb_sample.dvc` pins hash `0319edfe…`; `dvc pull` restores exactly those 39 files. A month file with the wrong columns or dates fails `validate`. |
 | `features.complaint_features` | downstream to training (and Lab 4 serving) | this project | One row per complaint with text and a mapped label; columns fixed by `feature_version`; only months whose `ops.quality_results` all passed are read. |
 | MLflow registry | downstream to Lab 4 serving | this project | Model `complaint-router`, alias `champion`; every version tagged `data_version` and `git_commit`. |
 | Intake channel | upstream requests | simulated (replay script) | Delivers complaints to the Triage desk with `complaint_id`, `narrative` and form fields. |
