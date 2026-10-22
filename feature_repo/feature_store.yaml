@@ -1,0 +1,10 @@
+# Feast 0.66 repo for the optional Lab 2 part. Offline: Parquet file; online (Lab 4): SQLite.
+project: complaint_router
+provider: local
+registry: data/registry.db
+online_store:
+  type: sqlite
+  path: data/online.db
+offline_store:
+  type: file
+entity_key_serialization_version: 3

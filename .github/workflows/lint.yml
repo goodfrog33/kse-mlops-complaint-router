@@ -9,3 +9,26 @@ jobs:
       - run: make setup
       - run: make lint
       - run: make test
+
+  pipeline:
+    # The ETL steps end to end on a real Postgres, with the raw data pulled through DVC
+    # from the public mirror: rerun idempotency and the quality gate failing on purpose.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: complaints
+          POSTGRES_PASSWORD: complaints
+          POSTGRES_DB: warehouse
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U complaints" --health-interval 5s --health-retries 20
+    env:
+      WAREHOUSE_DSN: postgresql://complaints:complaints@localhost:5432/warehouse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: make setup
+      - run: make data-public
+      - run: make test-integration

@@ -17,6 +17,9 @@ lint:
 test:
 	uv run pytest -q
 
+test-integration:      ## pipeline end to end on Postgres (local stack or CI service)
+	uv run pytest -q -m integration
+
 env:
 	test -f .env || cp .env.example .env
 
@@ -63,11 +66,18 @@ wait:                  ## block until the newest backfill completes, then print 
 counts:                ## row counts per layer for MONTH
 	docker compose exec -T postgres psql -U complaints -d warehouse -c "select 'raw' as layer, count(*) from raw.complaints where batch_month='$(MONTH)' union all select 'dwh', count(*) from dwh.complaints where batch_month='$(MONTH)' union all select 'features', count(*) from features.complaint_features where batch_month='$(MONTH)'"
 
+feast-demo:            ## optional: Feast point-in-time join + online read (needs the backfill)
+	cd feature_repo && rm -rf data/registry.db data/online.db
+	uv run --group feast python scripts/feast_demo.py
+
 # --- model -------------------------------------------------------------------
 train:                 ## rules + TF-IDF model, registered with alias champion
 	uv run python -m complaint_router.train --register --alias champion
 
+backtest:              ## rolling-origin backtest, 3 monthly folds, logged to MLflow
+	uv run python -m complaint_router.backtest
+
 reproduce:             ## retrain the champion from its commit and data version
 	uv run python scripts/reproduce.py --alias champion
 
-.PHONY: setup lint test env up down dvc-creds data data-public data-seed backfill run-month wait counts train reproduce
+.PHONY: setup lint test test-integration env up down dvc-creds data data-public data-seed backfill run-month wait counts feast-demo train backtest reproduce

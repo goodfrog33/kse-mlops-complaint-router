@@ -13,3 +13,4 @@ data/*
 !data/raw/
 data/raw/*
 !data/raw/ccdb_sample.dvc
+feature_repo/data/

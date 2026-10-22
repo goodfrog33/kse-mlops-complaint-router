@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [dependency-groups]
+feast = ["feast==0.66.0"]
 dev = [
     "pre-commit==4.6.2",
     "pytest>=8.4",
@@ -38,3 +39,5 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: needs Postgres and the raw data"]
+addopts = "-m 'not integration'"
