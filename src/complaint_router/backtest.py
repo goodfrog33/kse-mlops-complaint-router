@@ -72,7 +72,7 @@ def main() -> dict:
                 out[name] = {"n_train": len(train), "n_test": len(test), **metrics}
                 print(name, json.dumps({k: round(v, 4) for k, v in metrics.items()}), flush=True)
         for key in ("model_macro_f1", "rule_macro_f1", "model_accuracy"):
-            values = [fold[key] for fold in out.values()]
+            values = [out[m.strftime("%Y-%m")][key] for m in folds]
             mean = sum(values) / len(values)
             std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
             mlflow.log_metrics({f"{key}_mean": mean, f"{key}_std": std})

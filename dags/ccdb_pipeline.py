@@ -31,7 +31,8 @@ def _month() -> date:
     # Last month in the raw sample (data/raw/ccdb_sample/2026-06.csv).
     end_date=pendulum.datetime(2026, 6, 1, tz="UTC"),
     catchup=False,
-    max_active_runs=1,
+    # Months are independent and every write is scoped to its own month, so they can overlap.
+    max_active_runs=6,
     params={"fault": Param(None, type=["null", "string"], enum=[None, *pipeline.FAULTS])},
     tags=["complaint-router"],
 )

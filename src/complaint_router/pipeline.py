@@ -322,7 +322,7 @@ def quality_check(month: date, version: str) -> dict:
                 "insert into ops.quality_results values (%s, %s, %s, %s, %s, %s)",
                 (month, name, float(value), threshold, bool(passed), version),
             )
-    failed = [f"{n}={v:.3g} (want {t})" for n, v, t, ok in checks if not ok]
+    failed = [f"{n}={v:.4g} (want {t})" for n, v, t, ok in checks if not ok]
     if failed:
         raise QualityGateError(f"quality_check {month_key(month)} failed: " + "; ".join(failed))
     return {name: value for name, value, _, _ in checks}

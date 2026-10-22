@@ -50,7 +50,7 @@ data-seed: dvc-creds   ## fill a fresh MinIO from the public mirror, so `make da
 backfill:              ## one DAG run per month, MONTHS_FROM..MONTHS_TO (first days of months)
 	$(AF) dags unpause ccdb_pipeline >/dev/null
 	$(AF) backfill create --dag-id ccdb_pipeline --from-date $(MONTHS_FROM) --to-date $(MONTHS_TO) \
-		--max-active-runs 1 --reprocess-behavior completed >/dev/null
+		--max-active-runs 6 --reprocess-behavior completed >/dev/null
 	@$(MAKE) -s wait
 
 run-month:             ## rerun one month: make run-month MONTH=2024-06-01 [FAULT=null_narratives]
