@@ -29,6 +29,16 @@ pytestmark = [
 ]
 
 
+def test_concurrent_schema_creation_does_not_race():
+    # Runs first: on an empty database (as in CI) six parallel first runs used to fail with
+    # UniqueViolation on CREATE ... IF NOT EXISTS. ensure_schema now takes an advisory lock.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(6) as pool:
+        for future in [pool.submit(pipeline.ensure_schema) for _ in range(6)]:
+            future.result()
+
+
 def snapshot(month: date) -> tuple:
     with pipeline.connect() as conn:
         counts = tuple(

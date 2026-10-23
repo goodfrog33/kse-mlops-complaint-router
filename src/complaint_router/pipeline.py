@@ -100,8 +100,15 @@ def connect() -> psycopg.Connection:
     return psycopg.connect(settings.WAREHOUSE_DSN)
 
 
+# Any constant: the advisory lock that serialises schema creation across concurrent runs.
+SCHEMA_LOCK = 4242
+
+
 def ensure_schema() -> None:
+    """Create schemas and tables if missing. Concurrent first runs on an empty database would
+    race on CREATE ... IF NOT EXISTS (UniqueViolation), so the DDL runs under a lock."""
     with connect() as conn:
+        conn.execute("select pg_advisory_xact_lock(%s)", (SCHEMA_LOCK,))
         conn.execute(DDL)
 
 
