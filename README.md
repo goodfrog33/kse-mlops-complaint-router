@@ -38,7 +38,9 @@ make feast-demo   # optional: Feast point-in-time join + online read
 | MinIO console (`minioadmin` / `minioadmin123`) | http://localhost:9101 |
 | Postgres warehouse | `postgresql://complaints:complaints@localhost:5442/warehouse` |
 
-Host ports avoid 5000, 5432 and 9000 on purpose. `.env.example` sets `MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD=false`, so MLflow downloads go through the server and never to `minio:9000`. The Apple Silicon `cryptography` workaround was not needed (Docker Desktop 29.3).
+The stack (Postgres, MinIO, MLflow, Airflow) plus training wants about **8 GB of free memory**; on a Mac under heavy swap, Docker Desktop's VM can be killed mid-run, which shows up as connection resets from MinIO. Host ports avoid 5000, 5432 and 9000 on purpose. `.env.example` sets `MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD=false`, so MLflow downloads go through the server and never to `minio:9000`. The Apple Silicon `cryptography` workaround was not needed (Docker Desktop 29.3).
+
+**Clean-clone rehearsal (2026-10-23).** Fresh clone of `main`, empty Docker volumes, the seven commands above in order: `make up` 35 s, `data-seed` + `data` 39 files with checksum `0bba9005…`, `backfill` 30/30 months in 62 s, `train` exactly 0.089 / 0.384 / 0.638, `reproduce` 0.6378 → 0.6378. The rehearsal found two bugs that a long-lived stack hid, both fixed: a schema-creation race when six first runs hit an empty database, and `make up` returning before Airflow and MLflow were ready.
 
 ## Data (step 2)
 
