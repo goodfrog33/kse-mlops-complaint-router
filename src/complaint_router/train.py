@@ -31,6 +31,12 @@ from complaint_router import pipeline, settings
 from complaint_router.rules import KeywordRule, MajorityClass
 
 SEED = 42
+# MLflow 3 stores sklearn models with skops, which refuses types it does not know. These are
+# sklearn's own calibration classes; Lab 4 passes the same list when it loads the model.
+SKOPS_TRUSTED_TYPES = [
+    "sklearn.calibration._CalibratedClassifier",
+    "sklearn.calibration._SigmoidCalibration",
+]
 PARAMS = {
     "word_ngrams": "1-2",
     "word_min_df": 2,
@@ -257,7 +263,11 @@ def main(argv: list[str] | None = None) -> dict:
         )
         signature = infer_signature(test[x_cols].head(5), test_pred[:5])
         mlflow.sklearn.log_model(
-            model, name="model", signature=signature, input_example=test[x_cols].head(3)
+            model,
+            name="model",
+            signature=signature,
+            input_example=test[x_cols].head(3),
+            skops_trusted_types=SKOPS_TRUSTED_TYPES,
         )
         results[args.run_name] = {"run_id": run.info.run_id, **metrics}
 
