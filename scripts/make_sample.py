@@ -5,7 +5,7 @@ docs/data-profile.md for where it comes from). The full export is 5.6 GB, so the
 pipeline works on a sample:
 
 * months 2023-04 .. 2026-06 (39 monthly batches),
-* per month, the 3,000 complaints with the smallest value of a fixed integer hash of
+* per month, the 8,000 complaints with the smallest value of a fixed integer hash of
   ``complaint_id`` (Knuth multiplicative hash). This is a uniform random sample that is
   deterministic, independent of row order and stable across library versions (rows with
   no complaint_id, 0.09% of 2026-05 upstream, sort last and so are effectively excluded),
@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "data/raw/hf_snapshot"
 OUT = ROOT / "data/raw/ccdb_sample"
 FIRST, LAST = "2023-04", "2026-06"
-PER_MONTH = 3000
+PER_MONTH = 8000
 COLUMNS = [
     "complaint_id",
     "date_received",

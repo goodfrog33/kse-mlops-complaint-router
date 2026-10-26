@@ -1,6 +1,6 @@
 outs:
-- md5: 0319edfe2ad83a39d4d8241602a462f8.dir
-  size: 66309187
+- md5: 6b6bda8b4c8ece9715a5c9127a47dc8e.dir
+  size: 176388767
   nfiles: 39
   hash: md5
   path: ccdb_sample

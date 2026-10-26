@@ -19,12 +19,13 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from mlflow.models import infer_signature
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.svm import LinearSVC
 
 from complaint_router import pipeline, settings
 from complaint_router.rules import KeywordRule, MajorityClass
@@ -36,9 +37,14 @@ PARAMS = {
     "word_max_features": 50000,
     "char_ngrams": "3-5",
     "char_max_features": 50000,
-    "C": 4.0,
+    # Chosen on the validation quarter (design.md 7.2): calibrated linear SVM, val macro-F1
+    # 0.622 against 0.592 for the earlier logistic regression on the same features.
+    "classifier": "linear_svc_calibrated",
+    "C": 1.0,
     "class_weight": "balanced",
-    "max_iter": 3000,
+    "max_iter": 5000,
+    "calibration": "sigmoid",
+    "calibration_folds": 3,
     "target_precision": 0.95,
 }
 
@@ -120,11 +126,17 @@ def build_model() -> Pipeline:
             ("cat", OneHotEncoder(handle_unknown="ignore"), ["submitted_via", "state"]),
         ]
     )
-    clf = LogisticRegression(
-        C=PARAMS["C"],
-        class_weight=PARAMS["class_weight"],
-        max_iter=PARAMS["max_iter"],
-        random_state=SEED,
+    # Calibration turns SVM margins into probabilities, so the auto-route threshold is a
+    # real confidence. Its internal folds are unshuffled, which keeps training deterministic.
+    clf = CalibratedClassifierCV(
+        LinearSVC(
+            C=PARAMS["C"],
+            class_weight=PARAMS["class_weight"],
+            max_iter=PARAMS["max_iter"],
+            random_state=SEED,
+        ),
+        method=PARAMS["calibration"],
+        cv=PARAMS["calibration_folds"],
     )
     return Pipeline([("features", features), ("clf", clf)])
 
@@ -166,7 +178,7 @@ def main(argv: list[str] | None = None) -> dict:
     )
     ap.add_argument("--register", action="store_true")
     ap.add_argument("--alias", default=None)
-    ap.add_argument("--run-name", default="tfidf-logreg")
+    ap.add_argument("--run-name", default="tfidf-linearsvc")
     ap.add_argument("--allow-dirty", action="store_true")
     ap.add_argument("--skip-rules", action="store_true", help="train only the TF-IDF model")
     ap.add_argument("--extra-tag", action="append", default=[], help="key=value")
@@ -221,7 +233,7 @@ def main(argv: list[str] | None = None) -> dict:
     model = build_model()
     x_cols = ["text", "submitted_via", "state"]
     with mlflow.start_run(run_name=args.run_name) as run:
-        mlflow.set_tags({**tags, "model_type": "tfidf-logreg"})
+        mlflow.set_tags({**tags, "model_type": "tfidf-linearsvc"})
         mlflow.log_params({**PARAMS, **sizes, "seed": SEED})
         model.fit(train[x_cols], train["label"])
         val_pred, val_proba = model.predict(val[x_cols]), model.predict_proba(val[x_cols])
