@@ -21,7 +21,9 @@ import polars as pl
 from mlflow.models import infer_signature
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import VotingClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
@@ -36,6 +38,7 @@ SEED = 42
 SKOPS_TRUSTED_TYPES = [
     "sklearn.calibration._CalibratedClassifier",
     "sklearn.calibration._SigmoidCalibration",
+    "sklearn.utils._bunch.Bunch",
 ]
 PARAMS = {
     "word_ngrams": "1-2",
@@ -43,14 +46,18 @@ PARAMS = {
     "word_max_features": 50000,
     "char_ngrams": "3-5",
     "char_max_features": 50000,
-    # Chosen on the validation quarter (design.md 7.2): calibrated linear SVM, val macro-F1
-    # 0.622 against 0.592 for the earlier logistic regression on the same features.
-    "classifier": "linear_svc_calibrated",
-    "C": 1.0,
-    "class_weight": "balanced",
-    "max_iter": 5000,
+    # Chosen on the validation quarter (design.md 7.2): soft vote of a calibrated linear SVM
+    # (weight 0.7) and logistic regression (0.3). Val macro-F1 0.634, against 0.622 for the
+    # SVM alone and 0.592 for logistic regression alone, on the same features.
+    "classifier": "soft_vote_svc_logreg",
+    "svc_C": 1.0,
+    "svc_max_iter": 5000,
     "calibration": "sigmoid",
     "calibration_folds": 3,
+    "logreg_C": 4.0,
+    "logreg_max_iter": 3000,
+    "vote_weights": "0.7,0.3",
+    "class_weight": "balanced",
     "target_precision": 0.95,
 }
 
@@ -134,15 +141,26 @@ def build_model() -> Pipeline:
     )
     # Calibration turns SVM margins into probabilities, so the auto-route threshold is a
     # real confidence. Its internal folds are unshuffled, which keeps training deterministic.
-    clf = CalibratedClassifierCV(
+    svc = CalibratedClassifierCV(
         LinearSVC(
-            C=PARAMS["C"],
+            C=PARAMS["svc_C"],
             class_weight=PARAMS["class_weight"],
-            max_iter=PARAMS["max_iter"],
+            max_iter=PARAMS["svc_max_iter"],
             random_state=SEED,
         ),
         method=PARAMS["calibration"],
         cv=PARAMS["calibration_folds"],
+    )
+    logreg = LogisticRegression(
+        C=PARAMS["logreg_C"],
+        class_weight=PARAMS["class_weight"],
+        max_iter=PARAMS["logreg_max_iter"],
+        random_state=SEED,
+    )
+    clf = VotingClassifier(
+        [("svc", svc), ("logreg", logreg)],
+        voting="soft",
+        weights=[float(w) for w in PARAMS["vote_weights"].split(",")],
     )
     return Pipeline([("features", features), ("clf", clf)])
 
@@ -184,7 +202,7 @@ def main(argv: list[str] | None = None) -> dict:
     )
     ap.add_argument("--register", action="store_true")
     ap.add_argument("--alias", default=None)
-    ap.add_argument("--run-name", default="tfidf-linearsvc")
+    ap.add_argument("--run-name", default="tfidf-ensemble")
     ap.add_argument("--allow-dirty", action="store_true")
     ap.add_argument("--skip-rules", action="store_true", help="train only the TF-IDF model")
     ap.add_argument("--extra-tag", action="append", default=[], help="key=value")
@@ -239,7 +257,7 @@ def main(argv: list[str] | None = None) -> dict:
     model = build_model()
     x_cols = ["text", "submitted_via", "state"]
     with mlflow.start_run(run_name=args.run_name) as run:
-        mlflow.set_tags({**tags, "model_type": "tfidf-linearsvc"})
+        mlflow.set_tags({**tags, "model_type": "tfidf-ensemble"})
         mlflow.log_params({**PARAMS, **sizes, "seed": SEED})
         model.fit(train[x_cols], train["label"])
         val_pred, val_proba = model.predict(val[x_cols]), model.predict_proba(val[x_cols])
