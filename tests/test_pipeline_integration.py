@@ -58,7 +58,7 @@ def test_rerunning_a_month_leaves_identical_rows():
     first = snapshot(MONTH)
     pipeline.run_month(MONTH)
     assert snapshot(MONTH) == first
-    assert first[0] == (3000, 3000, 1013)
+    assert first[0] == (8000, 8000, 2683)
 
 
 def test_broken_batch_fails_the_gate_and_a_clean_rerun_recovers():
@@ -67,4 +67,4 @@ def test_broken_batch_fails_the_gate_and_a_clean_rerun_recovers():
     with pytest.raises(pipeline.QualityGateError, match="outside"):
         pipeline.run_month(MONTH, fault="wrong_month")
     pipeline.run_month(MONTH)
-    assert snapshot(MONTH)[0] == (3000, 3000, 1013)
+    assert snapshot(MONTH)[0] == (8000, 8000, 2683)

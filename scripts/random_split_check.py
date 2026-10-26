@@ -28,8 +28,15 @@ def main() -> None:
     mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
     mlflow.set_experiment(settings.MLFLOW_EXPERIMENT)
     with mlflow.start_run(run_name="random-split-leaky"):
-        mlflow.set_tags({"data_version": version, "git_commit": commit, "git_dirty": str(dirty),
-                         "split": "random", "purpose": "leakage illustration, not an evaluation"})
+        mlflow.set_tags(
+            {
+                "data_version": version,
+                "git_commit": commit,
+                "git_dirty": str(dirty),
+                "split": "random",
+                "purpose": "leakage illustration, not an evaluation",
+            }
+        )
         model = build_model().fit(train[X_COLS], train["label"])
         metrics = scores(test["label"], model.predict(test[X_COLS]), "random_test")
         mlflow.log_params({"n_train": len(train), "n_test": len(test), "seed": SEED})

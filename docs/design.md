@@ -131,10 +131,10 @@ One row per category, each with a number or an explicit assumption.
 
 | | |
 |---|---|
-| Raw dataset | `data/raw/ccdb_sample/YYYY-MM.csv`, 39 files, 2023-04 → 2026-06, 3,000 complaints per month (117,000 rows, 66 MB), columns exactly as published |
-| How it is drawn | [`scripts/make_sample.py`](../scripts/make_sample.py): per month, the 3,000 complaints with the smallest Knuth hash of `complaint_id`. Uniform, deterministic, byte-identical on rerun. All complaints are kept, with or without text, so each month's real text share survives. |
-| Batch grain | one calendar month = one DAG run, keyed on `data_interval_start`; up to 6 months run concurrently (all 39 in about 2 minutes). With overlapping runs the `ids_seen_in_previous_month` check sees the previous month only if it has already loaded, so it is weaker during a backfill than on the monthly schedule. |
-| Data version identifier | the DVC directory hash in [`data/raw/ccdb_sample.dvc`](../data/raw/ccdb_sample.dvc): **`0319edfe2ad83a39d4d8241602a462f8`**. Every warehouse row, quality result and MLflow run carries it. |
+| Raw dataset | `data/raw/ccdb_sample/YYYY-MM.csv`, 39 files, 2023-04 → 2026-06, 8,000 complaints per month (312,000 rows, 168 MB; raised from 3,000 so the small classes have enough validation and test examples), columns exactly as published |
+| How it is drawn | [`scripts/make_sample.py`](../scripts/make_sample.py): per month, the 8,000 complaints with the smallest Knuth hash of `complaint_id`. Uniform, deterministic, byte-identical on rerun. All complaints are kept, with or without text, so each month's real text share survives. |
+| Batch grain | one calendar month = one DAG run, keyed on `data_interval_start`; up to 6 months run concurrently (all 39 in about 3 minutes). With overlapping runs the `ids_seen_in_previous_month` check sees the previous month only if it has already loaded, so it is weaker during a backfill than on the monthly schedule. |
+| Data version identifier | the DVC directory hash in [`data/raw/ccdb_sample.dvc`](../data/raw/ccdb_sample.dvc): **`6b6bda8b4c8ece9715a5c9127a47dc8e`**. Every warehouse row, quality result and MLflow run carries it. |
 | DVC remotes | `minio` (default): `s3://dvc/complaint-router` on the local MinIO; `public`: a read-only HTTP mirror on the repository's `dvc-store` branch, so a reviewer can pull without credentials |
 | Label delay | 15 days after `date_received` (emulated, see below) |
 
@@ -188,7 +188,7 @@ A database instead of Parquet files for the three tables costs a running Postgre
 
 **Baseline 1 (rule).** A keyword dictionary per product, for example `mortgage|escrow|foreclos` → Mortgage, or `collector|collection agency` → Debt collection. The first match wins, and no match means route = manual. This is what a desk without ML would run. It is the baseline that the business metric "from 15%" is assumed against.
 
-**Candidate (as trained in Lab 2).** TF-IDF on the cleaned narrative (word 1–2-grams, 50,000 features, plus character 3–5-grams, 50,000 features) and one-hot `submitted_via` and `state`, feeding logistic regression with balanced class weights (`C=4`, seed 42). The confidence threshold for auto-routing is the lowest value at which predictions on the validation quarter reach 95% precision. Probabilities are not calibrated yet; isotonic calibration moves to Lab 4, when the threshold starts to matter for serving.
+**Candidate (as trained in Lab 2).** TF-IDF on the cleaned narrative (word 1–2-grams, 50,000 features, plus character 3–5-grams, 50,000 features) and one-hot `submitted_via` and `state`, feeding a soft vote of two classifiers with balanced class weights: a linear SVM (`C=1`) calibrated with sigmoid scaling over 3 unshuffled folds (weight 0.7) and logistic regression (`C=4`, weight 0.3). The classifier and the weights were chosen on the validation quarter (7.2). The confidence threshold for auto-routing is the lowest value at which predictions on the validation quarter reach 95% precision.
 
 **Feature list and serving-time source** (feature table `features.complaint_features`, `feature_version = v1`).
 
@@ -206,7 +206,7 @@ CFPB replaces redacted personal data with `XXXX`; `clean_text` applies the same 
 
 ### 5.4 Experimentation and validation
 
-**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). On the Lab 2 sample this gives 23,918 / 2,377 / 1,933 texts. A rolling-origin backtest (`make backtest`, 3 folds, each training on the 24 months before its test month) gives model macro-F1 0.684 ± 0.026 against the rule's 0.385 ± 0.014 (7.2).
+**Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). On the Lab 2 sample this gives 63,207 / 6,400 / 5,212 texts. Model choices (classifier, weights, threshold) use validation only; test is scored once per registered version. A rolling-origin backtest (`make backtest`, 3 folds, each training on the 24 months before its test month) gives model macro-F1 0.649 ± 0.046 against the rule's 0.381 ± 0.004 (7.2).
 
 **Offline metrics.** Macro-F1 (optimizing), accuracy, macro recall, and coverage and precision at the chosen threshold; per-class F1 and precision are logged as `per_class_test.json`. For scoring, the keyword rule's "no match" falls back to the majority class, so every complaint gets a label.
 
@@ -315,7 +315,7 @@ Layer 3 has no online feature store on purpose. Every v1 feature is computed fro
 flowchart LR
     REM(("DVC remote<br/>MinIO s3://dvc<br/>+ public mirror"))
     subgraph RAW["Raw"]
-        R1["ccdb_sample/YYYY-MM.csv<br/>+ md5 0319edfe…"]
+        R1["ccdb_sample/YYYY-MM.csv<br/>+ md5 6b6bda8b…"]
         R2["raw.complaints<br/>(text columns)"]
     end
     subgraph CLEAN["Clean"]
@@ -430,7 +430,7 @@ Host ports avoid 5000, 5432 and 9000, which are often taken.
 | Design throughput | 20 req/s on one replica (1 CPU, 1 GB) | About 8× headroom over peak. Verified with a load test in Lab 4. |
 | p95 latency | ≤ 300 ms end to end at the service | Split: JSON parse + preprocess ≤ 20 ms, vectorize + predict ≤ 30 ms, logging ≤ 50 ms (async), the rest is headroom for the network and the cluster |
 | Lab 3 LLM rationale | Not on the routing path. Generated on demand when an agent opens a `manual` complaint, p95 ≤ 10 s. | Keeps the LLM from ever blocking routing |
-| Training | ≤ 30 min on a laptop CPU for 24 months of narratives | **Measured in Lab 2:** about 5 min for the TF-IDF model on 23,918 texts (Apple M-series CPU), most of it in the character n-grams |
+| Training | ≤ 30 min on a laptop CPU for 24 months of narratives | **Measured in Lab 2:** about 10 min for the TF-IDF soft-vote model on 63,207 texts (Apple M-series CPU), most of it in logistic regression and the calibration folds |
 
 ### 6.4 Security
 
@@ -443,7 +443,7 @@ Host ports avoid 5000, 5432 and 9000, which are often taken.
 
 - CFPB publishes narratives only with consumer consent and scrubs personal data, replacing it with `XXXX`. Residual personal data (names, account fragments) is still possible.
 - The service applies the same masking at intake (5.3). `prediction_log` stores a SHA-256 hash of the narrative, never the raw text, plus derived features (length, OOV rate) for monitoring.
-- **Lab 2, concretely:** `raw.complaints` keeps the narrative exactly as CFPB published it (already redacted). From `dwh` on, narratives pass through `clean_text`, which additionally masks e-mails and digit runs of 4+; `ops.cleaning_log` counts the rows it changed per month (481 of 3,000 in 2024-06). ZIP codes and tags stay in the raw layer only.
+- **Lab 2, concretely:** `raw.complaints` keeps the narrative exactly as CFPB published it (already redacted). From `dwh` on, narratives pass through `clean_text`, which additionally masks e-mails and digit runs of 4+; `ops.cleaning_log` counts the rows it changed per month (1,295 of 8,000 in 2024-06). ZIP codes and tags stay in the raw layer only.
 - **Retention:** raw monthly snapshots are kept for the life of the course project (needed for reproducibility). `prediction_log` and `label_log` are kept 180 days, which covers the 15-day label delay plus six monthly comparisons. Nothing is shared outside the repository and its local stack.
 
 ### 6.6 Monitoring and alarms
@@ -490,7 +490,7 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 |---|---|---|---|
 | CFPB Consumer Complaint Database | upstream data | CFPB (external, no SLA) | Daily full CSV export with the documented field set. We tolerate up to 3 days of staleness. A schema change is detected at the quality gate (column set and types) and fails the run without touching `features/`. **This contract already broke once:** the narrative column was dropped in 2026 (5.2). |
 | Text snapshot (Hugging Face mirror, 2026-07-06) | upstream data, one-off | third party; CFPB data is public domain | Read once by `scripts/make_sample.py`; the sample is versioned in DVC and the pipeline never reads the mirror. |
-| DVC remotes (`minio`, `public`) | upstream data for the pipeline | this project | `data/raw/ccdb_sample.dvc` pins hash `0319edfe…`; `dvc pull` restores exactly those 39 files. A month file with the wrong columns or dates fails `validate`. |
+| DVC remotes (`minio`, `public`) | upstream data for the pipeline | this project | `data/raw/ccdb_sample.dvc` pins hash `6b6bda8b…`; `dvc pull` restores exactly those 39 files. A month file with the wrong columns or dates fails `validate`. |
 | `features.complaint_features` | downstream to training (and Lab 4 serving) | this project | One row per complaint with text and a mapped label; columns fixed by `feature_version`; only months whose `ops.quality_results` all passed are read. |
 | MLflow registry | downstream to Lab 4 serving | this project | Model `complaint-router`, alias `champion`; every version tagged `data_version` and `git_commit`. |
 | Intake channel | upstream requests | simulated (replay script) | Delivers complaints to the Triage desk with `complaint_id`, `narrative` and form fields. |
@@ -529,27 +529,40 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 
 Filled in Lab 2 from the MLflow server (experiment `complaint-router`) and the warehouse.
 
-**Pipeline.** 39 monthly runs over data version `0319edfe2ad83a39d4d8241602a462f8`: 32 succeed, 7 fail `quality_check` on text share (2025-12: 0.100, then 0.036, 0.028, 0.030, 0.038, 0.010, 0.002 in 2026-06). Over the 30 training-window months, cleaning masked PII in 14,279 narratives, found 61,772 complaints without text, 0 duplicate ids and 0 unmapped products. A rerun of 2024-06 gives identical rows (3000 / 3000 / 1013) and an identical content hash.
+**Pipeline.** 39 monthly runs over data version `6b6bda8b4c8ece9715a5c9127a47dc8e` (8,000 complaints a month): 32 succeed, 7 fail `quality_check` on text share (2025-12: 0.110, then 0.039, 0.027, 0.032, 0.035, 0.010, 0.002 in 2026-06; 2026-06 also has one unmapped product, `Other`). Over the 30 training-window months, cleaning masked PII in 37,949 narratives, found 165,181 complaints without text, 0 duplicate ids and 0 unmapped products. A rerun of 2024-06 gives identical rows (8000 / 8000 / 2683) and an identical content hash.
 
-**Models** (test = 2025-07 .. 2025-09, 1,933 texts):
+**Why the sample grew.** With 3,000 complaints a month the test quarter held 5–30 examples of most small classes, so macro-F1 moved by noise (a random split even scored *below* the time split). At 8,000 a month the test quarter has 5,212 texts, 10–82 per small class.
 
-| Model | MLflow run | Val macro-F1 | Test macro-F1 | Test accuracy |
-|---|---|---:|---:|---:|
-| Majority class | `majority-class` | 0.089 | 0.089 | 0.797 |
-| Keyword rule | `keyword-rule` | 0.392 | 0.384 | 0.712 |
-| TF-IDF + logistic regression (registered v2, `@champion`) | `tfidf-logreg` `9523c18b…` | 0.591 | **0.638** | **0.876** |
+**Model selection** (validation 2025-04 .. 06, 6,400 texts; test scored only after the choice):
 
-At the validation-chosen threshold 0.77, 77.0% of test complaints are auto-routed with 0.948 precision: just under the 0.95 target of §3, against the 60% coverage target.
+| Classifier on the same TF-IDF features | Val macro-F1 | Test macro-F1 | Test accuracy |
+|---|---:|---:|---:|
+| Logistic regression, `C=4` | 0.592 | 0.631 | 0.856 |
+| LinearSVC `C=0.3 / 1 / 3` | 0.619 / 0.619 / 0.613 | — | — |
+| Calibrated LinearSVC `C=1` (registered v3) | 0.622 | 0.624 | 0.894 |
+| **Soft vote 0.7 SVC + 0.3 LR** (registered v4, `@champion`) | **0.634** | **0.633** | **0.895** |
 
-**Per class (test F1 / precision):** Credit reporting 0.94 / 0.96 · Mortgage 0.84 / 0.80 · Vehicle loan or lease 0.77 / 0.71 · Money transfer and virtual currency 0.75 / 0.90 · Checking or savings 0.73 / 0.67 · Debt collection 0.64 / 0.60 · Payday, title and personal loan 0.60 / 0.60 · Student loan 0.59 / 0.57 · Credit or prepaid card 0.52 / 0.45 · Debt or credit management 0.00 / 0.00.
+Larger vocabularies (all word 1–2-grams, word 1–3-grams, char 2–6-grams) did not help on validation (0.592–0.604 on the smaller sample). On test the three classifiers are within noise on macro-F1; the vote adds 3.9 points of accuracy over logistic regression.
 
-**Reading.** The model beats both rules, and the rule beats the majority class, so the ordering is the expected one. Macro-F1 0.638 is below the 0.80 target: the smallest class (≈ 50 training texts in the sample) is never predicted, and card complaints are confused with credit reporting and debt collection, the same overlap the label-noise examples show. Levers for later labs: more rows per month for the small classes, calibration, and the LLM baseline of Lab 3.
+**Champion against the baselines** (test 2025-07 .. 09, 5,212 texts):
 
-**Backtest** (parent run `backtest-rolling-origin`): 2025-07 0.652, 2025-08 0.682, 2025-09 0.716 (model) against 0.374, 0.377, 0.405 (rule). Training right up to the test month adds about 0.045 over the registered model, which stops three months earlier for validation.
+| Model | MLflow run | Test macro-F1 | Test accuracy |
+|---|---|---:|---:|
+| Majority class | `majority-class` | 0.088 | 0.786 |
+| Keyword rule | `keyword-rule` | 0.380 | 0.714 |
+| TF-IDF soft vote (v4) | `tfidf-ensemble` `ddef1ada…` | **0.633** | **0.895** |
 
-**Random split** (run `random-split-leaky`, tag `split=random`): 0.591, below the time split's 0.638. On this uniform 0.5% sample, same-event complaints rarely co-occur, so random-split leakage does not show; the gap is within the backtest's month-to-month spread.
+At the validation-chosen threshold 0.68, 85.8% of test complaints are auto-routed with 0.941 precision: above the 60% coverage target, just under the 0.95 precision target of §3, so the threshold set on validation does not fully transfer to test.
 
-**Lineage check.** `make reproduce` retrained v2 from its tags in a clean worktree: 0.6378 registered, 0.6378 reproduced (tolerance 0.005).
+**Per class (test F1 / precision):** Credit reporting 0.95 / 0.93 · Mortgage 0.84 / 0.84 · Checking or savings 0.74 / 0.70 · Vehicle loan or lease 0.72 / 0.78 · Money transfer and virtual currency 0.71 / 0.79 · Student loan 0.65 / 0.59 · Credit or prepaid card 0.63 / 0.70 · Debt collection 0.63 / 0.78 · Payday, title and personal loan 0.46 / 0.64 · Debt or credit management 0.00 / 0.00.
+
+**Reading.** The ordering is the expected one (model > rule > majority class). Macro-F1 stays near 0.63 for every classifier tried, so the ceiling is the data, not the learner: *Debt or credit management* has about 90 training texts and is never predicted, and payday, card and debt-collection complaints overlap in wording, the same overlap the label-noise examples (5.2) show.
+
+**Backtest** (parent run `backtest-rolling-origin`): 2025-07 0.615, 2025-08 0.714, 2025-09 0.618 (model) against 0.386, 0.381, 0.375 (rule); mean 0.649 ± 0.046. The month-to-month spread is the honest error bar on a single test number.
+
+**Random split** (run `random-split-leaky`, tag `split=random`): 0.688, 0.055 above the time split on the same model and test size. That is the optimism of training on months after the ones tested.
+
+**Lineage check.** `make reproduce` retrained v4 from its tags in a clean worktree: 0.6325 registered, 0.6325 reproduced (tolerance 0.005).
 
 ### 7.3 Serving and monitoring results
 
