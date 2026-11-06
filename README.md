@@ -8,12 +8,14 @@ A complaint intake desk receives fifteen to twenty thousand free-text consumer c
 
 | | |
 |---|---|
-| Design document | [`docs/design.md`](docs/design.md) (Lab 2 revised 5.2, 5.3, 5.4, 6.1, 6.2, 6.4, 6.5, 6.8, 7.2) |
+| Design document | [`docs/design.md`](docs/design.md) (Lab 3 revised 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.7, 6.8, 7.1, 7.2) |
 | Presentation (Lab 1) | [`docs/presentation/complaint-router-lab1.pptx`](docs/presentation/complaint-router-lab1.pptx) ([PDF](docs/presentation/complaint-router-lab1.pdf)) |
 | Presentation (Lab 2) | [`docs/presentation/complaint-router-lab2.pptx`](docs/presentation/complaint-router-lab2.pptx) ([PDF](docs/presentation/complaint-router-lab2.pdf)) |
 | Data profile | [`docs/data-profile.md`](docs/data-profile.md) |
 | Label map | [`configs/taxonomy_map.csv`](configs/taxonomy_map.csv): 20 CFPB product names → 10 classes |
 | Lab 2 defense notes (Ukrainian) | [`docs/defense/lab2-qa.md`](docs/defense/lab2-qa.md): the 20 questions of Appendix 2, answered from this repository |
+| Lab 3 defense notes (Ukrainian) | [`docs/defense/lab3-qa.md`](docs/defense/lab3-qa.md): the 20 questions of Lab 3 Appendix 2 |
+| LLM configuration | [`configs/llm.yaml`](configs/llm.yaml) and the prompts in [`prompts/`](prompts/) |
 
 ## Run it from a clean clone
 
@@ -29,6 +31,8 @@ make train        # rule baselines + the model, logged and registered as @champi
 make reproduce    # rebuild the @champion run from its commit and data version
 make backtest     # optional: rolling-origin backtest, 3 monthly folds
 make feast-demo   # optional: Feast point-in-time join + online read
+make corpus-public && make rag-index   # Lab 3: regulation corpus and vector index
+make llm-baseline && make rag-eval     # Lab 3: needs OPENROUTER_API_KEY in .env
 ```
 
 | Service | URL |
@@ -168,13 +172,109 @@ registered 0.6325  reproduced 0.6325  |diff| 0.0000  tolerance 0.005  -> OK
 
 The tolerance of **0.005 macro-F1** covers BLAS and thread-count differences across machines. Data, features, split and seeds are fixed (the calibration folds are unshuffled), so on the same platform the difference is 0. Reproducing a version with an *older* data version rewrites the training months in the warehouse with that version, until the next `make backfill`. The model uses sklearn calibration classes, which MLflow's skops serializer only saves when they are listed as trusted (`SKOPS_TRUSTED_TYPES` in `train.py`).
 
+## LLM component (Lab 3)
+
+Two jobs, both in [`docs/design.md`](docs/design.md) §5.1:
+
+1. **LLM baseline, same task.** The LLM predicts the same 10 product classes as the Lab 2 model, zero-shot, on the same 5,212 test complaints, and logs the same metrics (`test_macro_f1`, `test_accuracy`) into the same MLflow experiment `complaint-router`, next to the Lab 2 runs.
+2. **Retrieval over the regulations.** A triage agent working the manual queue asks a question about the rules that govern the product ("how many calls a week may a collector make?"); the system retrieves passages of the regulation and the LLM answers from them, citing the section.
+
+**Corpus.** The text of the six CFPB regulations that govern the ten products, from the eCFR (public, US government work): Reg B (12 CFR 1002), Reg E (1005), Reg F (1006), Reg V (1022), Reg X (1024), Reg Z (1026). Snapshot date 2026-10-01, regulation text only (no appendices, no official interpretations): **195 sections with text** (documents), 1.6 million characters. Six XML files in `data/corpus/ecfr/`, versioned by DVC: **`778db57b397bda283bdd9020aab52ebf`**, on both remotes. *Ask CFPB* articles, named in Lab 1, were dropped: the site refuses automated downloads.
+
+**Every setting in one file**: [`configs/llm.yaml`](configs/llm.yaml): server URL and model, temperature, chunk size and overlap, embedding model, top-k, judge model, prompt paths, evaluation set path. Code has no copy of any of them; `--set key=value` changes one value for one run and the run logs it.
+
+**Prompts are files**, hashed (sha256, 12 hex) on every run: [`prompts/classify.md`](prompts/classify.md), [`prompts/rag_answer.md`](prompts/rag_answer.md), [`prompts/judge.md`](prompts/judge.md), [`prompts/make_questions.md`](prompts/make_questions.md).
+
+**Inference: an API** (OpenRouter, OpenAI-compatible), model `anthropic/claude-haiku-5.5`, temperature 0, reasoning off. A `vllm serve` endpoint is a change of `base_url` and `model` in the config. Why an API and what it costs: design.md §6.3 and §6.7.
+
+```bash
+echo "OPENROUTER_API_KEY=..." >> .env   # your key; .env is git-ignored
+make corpus-public    # dvc pull the regulation corpus, no credentials (or: make corpus)
+make rag-index        # corpus -> chunks -> embeddings -> pgvector; prints the counts
+make llm-baseline     # zero-shot LLM on the Lab 2 test set (~15 min, ~$0.46)
+make rag-eval         # retrieval + answers + judge on the 40 questions (~2 min, ~$0.02)
+make rag-sweep PARAM=retrieve.top_k VALUES="1 3 10"   # one parameter, three values
+```
+
+`make rag-index` output (2026-11-06):
+
+```text
+corpus 778db57b397bda283bdd9020aab52ebf  chunk_size=800 overlap=100  model=sentence-transformers/all-mpnet-base-v2
+documents: 195  chunks: 2895  index_version: 852a5450ef92  embedding: 188.9 s
+```
+
+The index lives in Postgres (`pgvector/pgvector:pg16`, the same Postgres 16 as before plus the extension), table `rag.chunks`, keyed by `index_version` = hash of (corpus version, chunk size, overlap, embedding model). A rebuild replaces that version in one transaction; `rag.index_builds` records what was built and when. Search is exact cosine distance (no approximate index: 2,895 rows take 50 ms per query including the embedding).
+
+### LLM baseline against the Lab 2 model
+
+Same 5,212 test complaints (2025-07 .. 09), same metric, same MLflow experiment:
+
+| Run | Prompt hash | Test macro-F1 | Test accuracy | Tokens in / out | Cost | p50 / p95 latency |
+|---|---|---:|---:|---:|---:|---:|
+| `keyword-rule` (Lab 2) | — | 0.380 | 0.714 | — | 0 | — |
+| `llm-zero-shot`, product names only | `88711daaddb5` | 0.587 | 0.879 | 2,540,268 / 42,756 | $0.275 | 0.78 / 1.23 s |
+| `llm-zero-shot-v2`, plus one-line product definitions | `cd3105724a2f` | 0.601 | 0.880 | 4,395,740 / 42,850 | $0.461 | 0.78 / 1.06 s |
+| `tfidf-ensemble` v4 `@champion` (Lab 2) | — | **0.633** | **0.895** | — | 0 | ~ms on CPU |
+
+Editing the prompt file produced a new hash and a new run; the first run stays reproducible from its commit (`f5b1f0e`). The trained model still wins on macro-F1 and accuracy, costs nothing per call and answers in milliseconds, so it stays the router. The LLM is better on four classes (F1: *Payday, title and personal loan* 0.62 vs 0.46, *Debt or credit management* 0.17 vs 0.00, *Money transfer* 0.79 vs 0.71, *Checking or savings* 0.76 vs 0.74) and worse on *Debt collection* (0.57 vs 0.63) and *Student loan* (0.56 vs 0.65): a second opinion for the manual queue, not a replacement.
+
+### Evaluation set
+
+[`data/eval/rag_questions.jsonl`](data/eval/rag_questions.jsonl): **40 questions**, each with the relevant section id(s) and a reference answer. They were drafted by `google/gemini-2.5-flash` ([`scripts/make_eval_set.py`](scripts/make_eval_set.py), prompt [`prompts/make_questions.md`](prompts/make_questions.md)) from 40 sections sampled per regulation (10 from Reg Z, 6 from each of the others), a different model family from the answering model (Claude) and the judge (GPT). All 40 were read; **14 were edited**, and the `reviewed` field says why: questions that quoted a defined term (`limited-content message`, `estimated exchange rate`, `prepaid account`), stated the threshold they asked about, or could be answered by several regulations. Two questions (rescission refunds) accept two sections, because the rule is stated in both. The unedited draft is kept next to it as `rag_questions.draft.jsonl`.
+
+Relevance is at the **section** level, so the same labels hold for any chunk size. Metrics: hit rate at k (a chunk of a relevant section among the top k) and MRR over the top 10, computed by [`rag_eval.py`](src/complaint_router/rag_eval.py); the answer metric is an LLM judge (`openai/gpt-4.1-mini`, prompt [`prompts/judge.md`](prompts/judge.md), hash logged) that scores 1–5 against the reference answer, *pass* = 4 or 5. Every run also logs `citation_valid_rate` (every section the answer cites was retrieved) and `refusal_rate`.
+
+**Checking the judge.** (1) A control on every run: each answer is judged against a *different* question's reference; a judge that reads only fluency would pass them. `judge_control_pass_rate` = **0.00** on every run. (2) 12 answers of the final run graded by hand with the same rubric: pass/fail agreed on 12 of 12, the exact score on 10 of 12, never more than one point apart. (3) A known miss: in an early run the judge gave 5 to an answer that cited the wrong regulation, because the rubric grades facts, not sources; `citation_valid_rate` covers the source side.
+
+### One parameter at a time
+
+All runs in MLflow experiment `complaint-router-rag`, 40 questions, `claude-haiku-5.5` answering, top-k 5 unless varied. Cost and latency are the answering model's; the judge adds about $0.008 per run.
+
+**Chunk size** (embedding all-MiniLM-L6-v2, overlap 100):
+
+| chunk_size | Chunks | Hit@1 | Hit@5 | MRR@10 | Judge mean | Judge pass | Cost | p50 / p95 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 400 | 6,006 | 0.350 | 0.525 | 0.428 | 2.80 | 0.400 | $0.0061 | 1.26 / 1.95 s |
+| 800 | 2,895 | 0.325 | 0.500 | 0.400 | 2.93 | 0.425 | $0.0077 | 1.19 / 1.97 s |
+| 1600 | 1,311 | 0.275 | 0.575 | 0.399 | 3.28 | 0.500 | $0.0125 | 1.25 / 2.18 s |
+
+Smaller chunks rank the right section first more often (hit@1, MRR); bigger chunks carry more of the section into the prompt, so answers improve, at twice the tokens. The differences are two or three questions out of 40: chunking was not the bottleneck.
+
+**Embedding model** (chunk 800, overlap 100):
+
+| embedding_model | Hit@1 | Hit@5 | Hit@10 | MRR@10 | Judge mean | Judge pass | Index build |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all-MiniLM-L6-v2 (start) | 0.325 | 0.500 | 0.600 | 0.400 | 2.93 | 0.425 | 70 s |
+| multi-qa-MiniLM-L6-cos-v1 | 0.275 | 0.475 | 0.525 | 0.367 | 2.85 | 0.375 | 123 s |
+| BAAI/bge-small-en-v1.5 | 0.400 | 0.500 | 0.600 | 0.448 | 2.80 | 0.400 | 107 s |
+| **all-mpnet-base-v2** | **0.475** | **0.725** | **0.800** | **0.573** | **3.60** | **0.650** | 281 s |
+
+The larger general model wins by 9 questions at k = 5 and became the configured default. The question-answering MiniLM did worse than the general one: the questions paraphrase, and the regulations are not FAQ-shaped.
+
+**top-k** (all-mpnet-base-v2, chunk 800; retrieval metrics are the same index, so only the answer side moves):
+
+| top_k | Judge mean | Judge pass | Refusals | Tokens in | Cost | p50 / p95 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 3.15 | 0.525 | 0.275 | 17,648 | $0.0036 | 1.11 / 1.61 s |
+| 3 | 3.60 | 0.625 | 0.200 | 36,494 | $0.0060 | 1.17 / 1.61 s |
+| **5 (configured)** | **3.75** | **0.675** | 0.175 | 55,709 | $0.0080 | 1.24 / 1.88 s |
+| 10 | 4.05 | 0.750 | 0.100 | 103,231 | $0.0132 | 1.37 / 2.01 s |
+
+Every step up in k answers more questions and costs proportionally more input tokens. k = 5 stays configured for now: k = 10 buys 3 more passes in 40 for 1.9× the tokens per call; Lab 4 decides with the 10 s p95 budget of design.md §6.3 in hand. The same configuration run twice (runs `7b597a3b` and `69e28559`) gave judge pass 0.650 and 0.675: one question of difference is the noise floor of a 40-question set at temperature 0.
+
+**What the remaining misses are.** At k = 5 eleven questions miss retrieval; most are about a narrow clause inside a long section (*limited-content message* inside the definitions of Reg F), or a question that two regulations answer in similar words. With retrieval right, the answer model refuses rather than invents: `citation_valid_rate` is 1.00 on every run, and 7 of the 40 answers are the exact refusal string.
+
+**A cost that hid in the first run.** `claude-haiku-5.5` reasons before answering by default. In the first smoke run (`smoke`, kept in MLflow) reasoning took most of `max_tokens`, so 20 of 40 answers came back empty and one was cut mid-sentence, output tokens were 2.7× higher (12,677 vs 4,634) and p50 latency doubled (2.39 s vs 1.27 s). The billed completion tokens include those reasoning tokens; every run now logs `llm_tokens_reasoning` and `llm_empty_replies`, and `reasoning: false` is a line of the config.
+
 ## Tests and CI
 
 `make test` runs the unit tests in [`tests/`](tests/): the polars and Python cleaning functions give identical output (the training/serving contract), the faults break the batch, rule baselines and the month range.
 
 `make test-integration` runs [`tests/test_pipeline_integration.py`](tests/test_pipeline_integration.py) against a real Postgres: six concurrent schema creations do not race; a month run twice leaves identical rows and content hash; `null_narratives` and `wrong_month` faults raise `QualityGateError`; a clean rerun recovers.
 
-CI has two jobs on every push: `lint` (`make setup`, `make lint`, `make test`) and `pipeline`, which starts an empty Postgres service, pulls the raw data through DVC from the public remote (`make data-public`) and runs `make test-integration`. So a third party pulls the data and runs the pipeline on every push.
+CI has three jobs on every push: `lint` (`make setup`, `make lint`, `make test`); `pipeline`, which starts an empty Postgres service, pulls the raw data through DVC from the public remote (`make data-public`) and runs `make test-integration`; and `retrieval`, which pulls the regulation corpus from the public remote, rebuilds the vector index with `make rag-index` and scores retrieval on the 40 questions (no LLM key needed). So a third party pulls the data, runs the pipeline and rebuilds the index on every push.
+
+`tests/test_llm_rag.py` covers the LLM component without calling a model: chunk sizes and coverage, hit rate and MRR on a hand-made case, label parsing, config overrides, and that every prompt file formats and hashes.
 
 ## Maturity scorecard
 
@@ -187,3 +287,6 @@ CI has two jobs on every push: `lint` (`make setup`, `make lint`, `make test`) a
 | Quality gate present | `FAULT=null_narratives` fails `quality_check`, screenshot above; 2025-12 .. 2026-06 fail for real | Lab 2 |
 | Experiments tracked | every run in MLflow experiment `complaint-router` has params, metrics, `data_version` and `git_commit` | Lab 2 |
 | Model registered with lineage | `complaint-router` v4 `@champion` tagged with both; `make reproduce` → diff 0.0000 | Lab 2 |
+| LLM component evaluated | 40-question set with section ids and reference answers; hit rate@k, MRR and an LLM-judge score logged as runs in `complaint-router-rag`; the LLM baseline logged next to the Lab 2 runs with the same macro-F1; three sweeps tabled above | Lab 3 |
+| Prompts versioned | `prompts/*.md`; every LLM run carries `prompt_hash` (or `answer_prompt_hash`, `judge_prompt_hash`) and `config_hash`; the classify prompt edit shows two hashes, two runs | Lab 3 |
+| Cost and latency recorded | every LLM run logs tokens in, out and reasoning, cost in USD as billed by the provider, and p50/p95 latency over 40 to 5,212 calls; tables above | Lab 3 |

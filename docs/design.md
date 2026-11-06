@@ -5,9 +5,9 @@ Routing consumer financial complaints to the right product queue, with a system 
 | | |
 |---|---|
 | Author | Zakhar Staryk |
-| Status | Lab 2: pipeline, versioning, tracking and registry built; results in 7.2 |
-| Last revised | 2026-10-22 (Lab 2) |
-| Later revisions | Lab 2: 5.2, 5.4, 6.1, 7.2 · Lab 3: 5.3, 6.2, 6.7 · Lab 4: 6.1 (deployment), 6.3, 6.6, 7.3 · Lab 5: 6.8, 7.4 |
+| Status | Lab 3: LLM baseline and retrieval built and evaluated; results in 7.2 |
+| Last revised | 2026-11-06 (Lab 3) |
+| Later revisions | Lab 2: 5.2, 5.4, 6.1, 7.2 · Lab 3: 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.7, 6.8, 7.1, 7.2 · Lab 4: 6.1 (deployment), 6.3, 6.6, 7.3 · Lab 5: 6.8, 7.4 |
 
 Statements marked **Assumption:** are decisions taken without evidence yet. Each one names the lab that will confirm or replace it. Statements marked **Measured:** come from `scripts/profile_data.py`; the full numbers are in [`docs/data-profile.md`](data-profile.md).
 
@@ -84,7 +84,7 @@ One row per category, each with a number or an explicit assumption.
 
 - Product-level routing (one label per complaint) from the narrative plus intake-form fields.
 - Batch ingestion of the public CFPB export, data versioning, quality gate, training, registry, online serving, monitoring and drift alerts.
-- An LLM component (Lab 3): a zero-shot LLM classifier evaluated as a baseline against the trained model, and a retrieval-backed rationale for triage agents that cites Ask CFPB and regulation passages.
+- An LLM component (Lab 3): a zero-shot LLM classifier evaluated as a baseline against the trained model, and question answering over the regulations for triage agents, with citations to the regulation sections (5.1).
 - An agent (Lab 5) that can run the operational playbook: check drift, compare candidate with champion, draft a promotion note.
 
 ### Out of scope
@@ -117,6 +117,17 @@ One row per category, each with a number or an explicit assumption.
 "Consolidated" means the 20 product names CFPB used across its 2012, 2017 and 2023 taxonomies are mapped onto one stable set by the versioned table [`configs/taxonomy_map.csv`](../configs/taxonomy_map.csv). Credit card and prepaid card are one class because CFPB merged them from 2017 to 2023. 1,333 rows (0.008%) carry a product outside the map (`Other`, blank) and go to manual triage.
 
 **Rejected framing: issue-level routing.** CFPB's `Issue` field has many dozens of values, several of them shared across products and renamed between taxonomy versions. A flat classifier would be sparse in most classes and invalidated by every taxonomy change, and a hierarchical one doubles the evaluation surface before the simple system works. Product is what decides the owning team, so it is the decision that matters. Issue stays as a possible Lab 5+ extension.
+
+**The LLM component (Lab 3).** The system already has a model, so the LLM gets two jobs with their own contracts, not the routing decision:
+
+| | Job | Input → output | Corpus | Metric |
+|---|---|---|---|---|
+| **A. LLM baseline** (same task) | Predict the product class zero-shot, the task of the Lab 2 model | complaint text → one of the 10 class names | none (the complaint itself) | test macro-F1 and accuracy on the same 5,212 complaints as the Lab 2 model, logged in the same MLflow experiment |
+| **B. Regulation Q&A** (auxiliary job over a corpus) | Answer a triage agent's question about the rules that govern a product, from retrieved passages, citing the section | question → ≤ 4 sentences with `[section]` citations, or an explicit refusal | the six CFPB regulations in the eCFR (below) | retrieval hit rate@k and MRR; LLM-judge score against reference answers; citation validity |
+
+Job B serves the manual queue: an agent who has to decide whether a complaint about, say, collection calls is about a rule violation asks the question in plain words. It never routes and never answers consumers.
+
+**Corpus for job B.** The regulation text of Reg B (12 CFR 1002, equal credit opportunity), Reg E (1005, electronic fund transfers), Reg F (1006, debt collection), Reg V (1022, credit reporting), Reg X (1024, mortgage settlement and servicing) and Reg Z (1026, truth in lending): the rules behind the ten product classes. Source: the eCFR versioner API (`https://www.ecfr.gov/api/versioner/v1/full/{date}/title-12.xml?part=…`), snapshot 2026-10-01, public (US government work). Kept: every section with text (195 documents, 1.6 million characters); left out: appendices (model forms) and the official interpretations, which would more than triple the size without adding rules. Six XML files in `data/corpus/ecfr/`, versioned by DVC (`778db57b…`) on both remotes. *Ask CFPB*, named in Lab 1, was dropped because consumerfinance.gov refuses automated downloads.
 
 ### 5.2 Data
 
@@ -169,7 +180,7 @@ One row per category, each with a number or an explicit assumption.
 | A time axis | ✅ | `date_received` is daily from 2011-12 onwards. Lab 2 ingests "the next month" by replaying snapshot months; the official export keeps arriving daily for structured checks. Lab 4 replays months with real, measured drift: the August 2023 taxonomy change, the credit-reporting surge (0.8 million complaints in 2022, 5.4 million in 2025) and the narrative cut-off itself. Cost: no genuinely new text after 2025, so "new" text batches are replayed history. |
 | Enough history to hold out a period | ✅ | 3.8 million narratives over 2015-03 → 2025. Train on 24 months (2023-04 → 2025-03, 1,539,100 narratives), validate on 2025-04 → 2025-06 (324,620), test on 2025-07 → 2025-09 (316,072). 2025-10 onwards is the replay period for Labs 2 and 4. |
 | Labels with a known arrival delay | ✅ (emulated) | 15 days, grounded in CFPB's 15-day publication rule. The delay is a design choice on top of real data, stated as such. |
-| A text surface or a documented corpus | ✅ | The narratives are the data itself. For Lab 3 retrieval the corpus is (a) *Ask CFPB* consumer explainer articles (consumerfinance.gov/ask-cfpb) and (b) the eCFR text of the regulations that govern the products: Reg B (12 CFR 1002), Reg E (1005), Reg F (1006), Reg V (1022), Reg X (1024) and Reg Z (1026). Both are public. |
+| A text surface or a documented corpus | ✅ | The narratives are the data itself. For Lab 3 retrieval the corpus is the eCFR text of the regulations that govern the products: Reg B (12 CFR 1002), Reg E (1005), Reg F (1006), Reg V (1022), Reg X (1024) and Reg Z (1026), public, 195 sections (5.1). *Ask CFPB*, also named in Lab 1, was dropped: the site refuses automated downloads. |
 
 **Formats and layers (as built in Lab 2).**
 
@@ -204,6 +215,19 @@ A database instead of Parquet files for the three tables costs a running Postgre
 
 CFPB replaces redacted personal data with `XXXX`; `clean_text` applies the same masking to e-mails, digit runs of 4+ and masked dates, so raw intake text matches the redacted training text.
 
+**LLM baseline (Lab 3, job A).** `anthropic/claude-haiku-5.5` through an OpenAI-compatible API, temperature 0, reasoning off, `max_tokens` 20, zero-shot: the prompt ([`prompts/classify.md`](../prompts/classify.md)) lists the ten class names (version 2 adds a one-line definition of each) and asks for exactly one. The input is the cleaned narrative, cut at 4,000 characters. A reply that is not exactly one class name counts as wrong (`test_unparsed_share`, 0.2–0.5%).
+
+**Retrieval and answer (Lab 3, job B).** Every setting is in [`configs/llm.yaml`](../configs/llm.yaml); code reads nothing else.
+
+| Step | Technique | Setting (configured value) |
+|---|---|---|
+| Parse | eCFR XML → one document per section (`DIV8 TYPE="SECTION"`), paragraphs kept | corpus date 2026-10-01, six parts |
+| Chunk | greedy packing of paragraphs up to `chunk_size` characters; a paragraph longer than that is cut at a word; the last `chunk_overlap` characters start the next chunk; every chunk starts with the section header (`§ 1006.14 Harassing, oppressive, or abusive conduct.`), so a passage is citable alone | 800 / 100 |
+| Embed | sentence-transformers on CPU, normalized vectors | `all-mpnet-base-v2` (768 dimensions), chosen by the sweep in 7.2 |
+| Index | pgvector in the existing Postgres, table `rag.chunks`, exact cosine search (2,895 rows need no approximate index) | `index_version` = hash of corpus version, chunk size, overlap and embedding model |
+| Retrieve | top-k chunks by cosine distance | k = 5 |
+| Answer | [`prompts/rag_answer.md`](../prompts/rag_answer.md): answer from the passages only, cite `[section]` after each statement, or reply with a fixed refusal sentence | `claude-haiku-5.5`, temperature 0, `max_tokens` 400 |
+
 ### 5.4 Experimentation and validation
 
 **Split.** By time, never random. Complaints about one event (a bank outage, a data breach) cluster in time and share wording, so a random split leaks the future into training and inflates the score. The split is train 2023-04 → 2025-03, validation 2025-04 → 2025-06 (threshold and calibration), test 2025-07 → 2025-09 (reported once). On the Lab 2 sample this gives 63,207 / 6,400 / 5,212 texts. Model choices (classifier, weights, threshold) use validation only; test is scored once per registered version. A rolling-origin backtest (`make backtest`, 3 folds, each training on the 24 months before its test month) gives model macro-F1 0.649 ± 0.046 against the rule's 0.381 ± 0.004 (7.2).
@@ -218,6 +242,16 @@ CFPB replaces redacted personal data with `XXXX`; `clean_text` applies the same 
 4. p95 latency on the replay set ≤ 300 ms.
 
 Promotion itself is a human step (5.5).
+
+**Evaluating the LLM component (Lab 3).**
+
+- **Job A** is scored exactly like the Lab 2 model: test months 2025-07 .. 09, all 5,212 complaints, macro-F1 and accuracy, in the same MLflow experiment, so the comparison is a row in a table rather than an argument.
+- **Job B** has an evaluation set of 40 questions ([`data/eval/rag_questions.jsonl`](../data/eval/rag_questions.jsonl)), one per sampled section (10 from Reg Z, 6 from each other regulation, sections of at least 1,500 characters), each with the relevant section id(s) and a reference answer. They were drafted by `google/gemini-2.5-flash` from the section text with [`prompts/make_questions.md`](../prompts/make_questions.md), which forbids naming the regulation or the section and copying any three-word phrase, and then read by hand: 14 of 40 were rewritten (quoted defined terms, a stated threshold, a question several regulations answer). Relevance is at the section level, so the labels survive any change of chunking.
+- **Retrieval metrics:** hit rate at 1, 3, 5, 10 and MRR over the top 10, per question, computed in `complaint_router.rag_eval`.
+- **Answer metric:** an LLM judge, `openai/gpt-4.1-mini` (a different family from the answering model and from the question writer), with a versioned prompt ([`prompts/judge.md`](../prompts/judge.md)) that scores 1–5 against the reference answer; pass = 4 or 5. An empty answer scores 1 without asking the judge. Two deterministic checks run beside it: `citation_valid_rate` (every cited section was among the retrieved ones) and `refusal_rate`.
+- **Judge control:** each answer is also judged against a *different* question's reference; `judge_control_pass_rate` must stay near 0.
+- **One parameter at a time:** `--set key=value` changes one setting for one run; the run logs the setting, the hash of `configs/llm.yaml` and the hash of the effective configuration. Swept so far: chunk size, embedding model, top-k (7.2).
+- **Every LLM run logs** the model id, temperature, `max_tokens`, top-k, prompt hashes, `git_commit`, corpus and index version, the eval-set hash, tokens in, out and reasoning, cost as billed by the provider, and p50/p95 latency over all its calls (40 or 5,212).
 
 ### 5.5 Human in the loop
 
@@ -241,7 +275,7 @@ flowchart LR
     TRIAGE["Triage desk<br/>(ticketing queue, simulated)"] -- "POST /predict" --> SYS
     SYS -- "product + confidence + route" --> TRIAGE
     LABELS["Routing outcomes<br/>(CFPB Product, 15-day delay; agent overrides)"] -- "labels" --> SYS
-    CORPUS["Ask CFPB + eCFR regulations<br/>(Lab 3 corpus)"] -- "policy documents" --> SYS
+    CORPUS["eCFR regulations<br/>(Lab 3 corpus)"] -- "regulation text" --> SYS
     SYS -- "drift / quality / latency alerts" --> ONCALL["ML on-call<br/>(project owner, e-mail)"]
 
     SYS["complaint-router<br/>ingests, trains, serves, monitors"]
@@ -365,6 +399,42 @@ flowchart LR
     class TS inf;
 ```
 
+#### Lab 3: the retrieval pipeline
+
+```mermaid
+flowchart LR
+    CFG[["configs/llm.yaml<br/>chunk_size 800 · overlap 100<br/>embedding all-mpnet-base-v2<br/>top_k 5 · model · prompts"]]
+    subgraph ING["Ingestion: make rag-index"]
+        direction LR
+        C["Corpus<br/>eCFR 12 CFR 1002, 1005, 1006,<br/>1022, 1024, 1026 (2026-10-01)<br/>DVC 778db57b…, 195 sections"] --> CH["Chunk<br/>800 chars, overlap 100,<br/>section header on each"] --> EM["Embed<br/>all-mpnet-base-v2, CPU"] --> IX[("pgvector · rag.chunks<br/>index_version 852a5450ef92<br/>2,895 chunks")]
+    end
+    subgraph Q["Query path"]
+        direction LR
+        QU["Question<br/>triage agent (eval set: 40)"] --> RT["Retrieve top-k<br/>k = 5, exact cosine"] --> LLM["LLM: claude-haiku-5.5<br/>via OpenRouter<br/>prompts/rag_answer.md (hashed)"] --> AN["Answer with [section]<br/>citations; tokens, cost,<br/>latency → MLflow"]
+    end
+    IX -- "nearest chunks" --> RT
+    CFG -.-> CH & EM & RT & LLM
+    classDef inf fill:#1f4fbf,color:#fff,stroke:#1f4fbf;
+    class IX,LLM inf;
+```
+
+*Corpus in, answer out, every setting in one file.*
+
+#### Lab 3: the evaluation loop
+
+```mermaid
+flowchart LR
+    ES["Evaluation set<br/>40 questions, section ids,<br/>reference answers"] --> RUN["make rag-eval<br/>retrieval + answer,<br/>same config file as serving"]
+    RUN --> M["Metrics<br/>hit rate@1/3/5/10, MRR@10,<br/>judge score (gpt-4.1-mini,<br/>prompts/judge.md hashed),<br/>citation validity, control"]
+    M --> ML["MLflow run<br/>complaint-router-rag:<br/>params, metrics, prompt and<br/>config hashes, cost, p50/p95"]
+    ML --> CH{"change one parameter<br/>--set key=value"}
+    CH -- "run again" --> RUN
+    classDef inf fill:#1f4fbf,color:#fff,stroke:#1f4fbf;
+    class ML inf;
+```
+
+*One parameter, three values, one table: chunk size 400 / 800 / 1600, embedding model ×4, top-k 1 / 3 / 5 / 10 (7.2).*
+
 #### Deployment (first draft)
 
 ```mermaid
@@ -396,7 +466,7 @@ The local stack is pinned to the course reference. Cloud columns are what would 
 
 | Service | Image | Host port | Holds |
 |---|---|---|---|
-| `postgres` | `postgres:16` | 5442 | databases `airflow` (metadata), `mlflow` (backend store), `warehouse` (schemas `raw`, `dwh`, `features`, `ops`) |
+| `postgres` | `pgvector/pgvector:pg16` (Postgres 16 + pgvector 0.8.7; was `postgres:16` until Lab 3) | 5442 | databases `airflow` (metadata), `mlflow` (backend store), `warehouse` (schemas `raw`, `dwh`, `features`, `ops`, and `rag` from Lab 3) |
 | `minio` | `pgsty/silo:RELEASE.2026-09-16T00-00-00Z` | 9100 (API), 9101 (console) | buckets `dvc` (DVC remote) and `mlflow` (artifacts) |
 | `minio-init` | `amazon/aws-cli:2.38.3` | — | creates the two buckets, then exits |
 | `mlflow` | `ghcr.io/mlflow/mlflow:v3.16.1` + psycopg2, boto3 | 5050 | tracking server and model registry; `--serve-artifacts` proxies artifacts to MinIO |
@@ -417,8 +487,9 @@ Host ports avoid 5000, 5432 and 9000, which are often taken.
 | Kubernetes cluster | Runs services in Lab 4 | Minikube 1.33.1 (K8s 1.30.0, docker driver, 4 GB) | Amazon EKS | GKE | AKS |
 | Model and data monitoring | Daily drift and performance reports | Evidently | SageMaker Model Monitor | Vertex AI Model Monitoring | Azure ML model monitoring |
 | Metrics and dashboards | Latency, errors, alert rules | Prometheus, Grafana | Amazon CloudWatch | Cloud Monitoring | Azure Monitor |
-| Vector store (Lab 3) | Index over Ask CFPB + eCFR passages | pgvector 0.8.7 (`pgvector/pgvector:pg16`) | OpenSearch Serverless vector search | Vertex AI Vector Search | Azure AI Search |
-| LLM inference (Lab 3) | Routing rationale with citations | vLLM 0.30.0 on CPU, or a hosted API. **Assumption:** a hosted API, decided in Lab 3. | Amazon Bedrock | Vertex AI generative AI | Azure OpenAI |
+| Vector store (Lab 3) | Index over eCFR regulation passages | pgvector 0.8.7 (`pgvector/pgvector:pg16`), the same Postgres | pgvector in the RDS instance (chosen in 6.7; OpenSearch Serverless vector search is the managed alternative) | Vertex AI Vector Search | Azure AI Search |
+| LLM inference (Lab 3) | Zero-shot baseline; regulation Q&A with citations | **Decided: a hosted API**, OpenRouter (OpenAI-compatible) serving `anthropic/claude-haiku-5.5`; judge `openai/gpt-4.1-mini`. vLLM 0.30.0 rejected for this laptop (6.3, 7.1). | Amazon Bedrock | Vertex AI generative AI | Azure OpenAI |
+| Embedding model (Lab 3) | Chunk and query vectors | sentence-transformers 6.2.0, `all-mpnet-base-v2`, CPU | the same model in the service container (or Bedrock Titan embeddings) | Vertex AI text embeddings | Azure OpenAI embeddings |
 
 ### 6.3 Performance
 
@@ -429,12 +500,15 @@ Host ports avoid 5000, 5432 and 9000, which are often taken.
 | Expected load | ~0.5 req/s average in intake hours, ~2.5 req/s peak | Measured 21,000 complaints a day (2026); assumed 12 intake hours and 5× peak |
 | Design throughput | 20 req/s on one replica (1 CPU, 1 GB) | About 8× headroom over peak. Verified with a load test in Lab 4. |
 | p95 latency | ≤ 300 ms end to end at the service | Split: JSON parse + preprocess ≤ 20 ms, vectorize + predict ≤ 30 ms, logging ≤ 50 ms (async), the rest is headroom for the network and the cluster |
-| Lab 3 LLM rationale | Not on the routing path. Generated on demand when an agent opens a `manual` complaint, p95 ≤ 10 s. | Keeps the LLM from ever blocking routing |
+| Lab 3 regulation Q&A | Not on the routing path. On demand when an agent asks, p95 ≤ 10 s end to end. | **Measured (40 questions, k = 5):** retrieval (query embedding + exact search) p50 56 ms, p95 72 ms; LLM answer p50 1.24 s, p95 1.88 s. About 2 s at p95, a fifth of the budget. |
+| Lab 3 LLM baseline (not deployed) | Would be on the routing path if it routed, against a 300 ms p95 | **Measured (5,212 calls, 8 in parallel):** p50 0.78 s, p95 1.06 s. Three times the routing budget at the median, one of the reasons it does not route. |
 | Training | ≤ 30 min on a laptop CPU for 24 months of narratives | **Measured in Lab 2:** about 10 min for the TF-IDF soft-vote model on 63,207 texts (Apple M-series CPU), most of it in logistic regression and the calibration folds |
+
+**Local inference or an API (Lab 3).** The LLM runs behind an API (OpenRouter, OpenAI-compatible), not on this laptop. Self-hosting with vLLM was the reference option, and on this machine (Apple Silicon, 18 GB RAM, Docker capped at 8 GB, swap already near its limit during Lab 2 training) it means a CPU image built locally and a 0.5–1.5 B parameter model needing about 7 GB of container memory and 1–2 s for a short prompt. A model that small would not be the one compared above; a 7–8 B model needs a GPU (an A10G-class cloud GPU is about $1 an hour, roughly $730 a month always on). The API costs what 6.7 measures: $0.0002 per regulation answer and $0.00009 per classified complaint, with p95 under 2 s and no memory on the laptop. What the API costs instead: **privacy**, because questions and, for job A, complaint narratives leave the machine (the corpus is public and the narratives are CFPB's redacted public text, but a real desk would need a provider with a no-retention contract, or self-hosting); **reproducibility**, because the provider can change the model behind the same name (the fixed test set and the evaluation set are rerun to detect it, 6.9); and a **network dependency** for a component that is off the routing path. The code talks to the API exactly as it would to `vllm serve`, so moving is a change of `base_url` and `model` in `configs/llm.yaml`.
 
 ### 6.4 Security
 
-- **Secrets** (MinIO keys, Postgres password, API key, LLM API key) live in a git-ignored `.env` locally, in Kubernetes Secrets in Lab 4, and in AWS Secrets Manager in the cloud column. Nothing secret is committed, and the CI lint job needs none.
+- **Secrets** (MinIO keys, Postgres password, API key, LLM API key `OPENROUTER_API_KEY`) live in a git-ignored `.env` locally, in Kubernetes Secrets in Lab 4, and in AWS Secrets Manager in the cloud column. Nothing secret is committed, and the CI lint job needs none.
 - **Who may call the service:** only the Triage desk, with an `X-API-Key` header. In Minikube the service is `ClusterIP` and is not exposed outside the cluster except through port-forward for demos.
 - MLflow, Airflow and Grafana UIs are bound to localhost only.
 - **Lab 2, concretely:** `.env` (git-ignored, created from `.env.example`) holds the MinIO and Postgres passwords. DVC credentials go into `.dvc/config.local` (git-ignored) through `make dvc-creds`; the committed `.dvc/config` has only the bucket URL and endpoint. Airflow runs with `SIMPLE_AUTH_MANAGER_ALL_ADMINS=True` (no login), acceptable only because the stack is local; Lab 4 replaces it. The public DVC mirror is read-only HTTP and holds only public-domain CFPB data.
@@ -478,11 +552,11 @@ An estimate of the AWS column for one month in `us-east-1`. Nothing here is run.
 | Amazon ECR | < 5 GB images | 1 |
 | Amazon CloudWatch | metrics, logs (< 10 GB), a few alarms | 15 |
 | SageMaker Model Monitor | replaced by Evidently as an EKS CronJob (already counted in EKS) | 0 |
-| OpenSearch Serverless (Lab 3) | minimum capacity units for a small vector collection | 175 |
-| Amazon Bedrock (Lab 3) | rationale on demand for ~10% of 630k complaints/month: 63k calls × (1.5k in + 200 out) tokens on a small model | 160 |
-| **Total** | | **≈ 905** |
+| Vector store (Lab 3) | **pgvector in the RDS instance**, one size up (db.t4g.small) for the index and the extension; OpenSearch Serverless (minimum capacity, ≈ $175) rejected | 15 |
+| Amazon Bedrock (Lab 3) | **from measured tokens:** one regulation question for ~10% of 630k complaints a month = 63k calls × (1,393 in + 122 out) tokens at $0.10 / $0.50 per million (`claude-haiku-5.5` list price via OpenRouter; **assumption:** the same on Bedrock) | 13 |
+| **Total** | | **≈ 597** |
 
-The total is above the $800 ceiling in section 4. The first lever is the vector store: pgvector inside the existing RDS instance instead of OpenSearch Serverless brings the total to about $730. That is the planned choice, to be confirmed in Lab 3. The most fragile assumption is the LLM call volume, which scales linearly with complaints and with the share routed manually.
+**Revised in Lab 3 with measured numbers** (MLflow runs in 7.2). Lab 1 estimated the vector store at $175 and the LLM at $160, which put the total at $905, over the $800 ceiling. Measured, the LLM side is small: a regulation answer at k = 5 costs **$0.00020** (55,709 input and 4,886 output tokens for 40 questions, $0.0080, as billed), and a zero-shot classification **$0.000088** per complaint ($0.461 for 5,212). The judge adds $0.0002 per question and runs only in evaluation. The vector store moves into the existing Postgres, which costs one instance size. The total, about $600, is under the ceiling. Local compute for job B: building the index embeds 2,895 chunks in 189 s on a laptop CPU; a query embeds and searches in 56 ms (p50). The whole Lab 3 development cost about $1.05 in API calls, as logged: two full baseline runs $0.74, twelve evaluation runs $0.29 with the judge and its control, question drafting $0.02. The fragile number is still the call volume: if agents ask three questions per manual complaint instead of one, Bedrock is about $40.
 
 ### 6.8 Integration points
 
@@ -497,7 +571,8 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 | Triage desk | downstream consumer | intake desk (simulated) | Calls `POST /predict` per F1/F2 with a 2 s timeout. On error or timeout it falls back to the manual queue. Response fields are versioned and new fields are additive only. |
 | Routing outcomes (labels) | upstream labels | intake desk + CFPB | `complaint_id`, final `product`, `source ∈ {cfpb_delayed, human_override}` and timestamp, delivered ≥ 15 days after prediction. |
 | ML on-call | downstream alerts | project owner | E-mail alerts per 6.6, acknowledged within 1 business day. |
-| Ask CFPB + eCFR (Lab 3) | upstream documents | CFPB, Office of the Federal Register | Public pages and regulation XML, re-fetched monthly and versioned like data. |
+| eCFR (Lab 3) | upstream documents | Office of the Federal Register | Regulation XML from the versioner API for a fixed date (`corpus.date` in `configs/llm.yaml`). A new date is fetched with `make corpus-fetch`, versioned with `dvc add`, pushed to both remotes, and the index rebuilt with `make rag-index`; the new corpus version changes `index_version`, so an index built from the old text is never queried by mistake. |
+| LLM API (Lab 3) | external service | OpenRouter (routing to Anthropic and OpenAI) | OpenAI-compatible `chat/completions`; key in `.env`; the provider reports tokens, reasoning tokens and cost per call, which every run logs. No SLA: job B is off the routing path, and a failed call is logged as an error and scored wrong. |
 
 ### 6.9 Risks and uncertainties
 
@@ -511,6 +586,7 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 | **Selection bias:** narratives exist only for consenting consumers. | State it as a known limit. Complaints without a narrative go to manual triage (out of scope). |
 | **Training/serving skew** in company names and PII masking. | `preprocess()` ships inside the model artifact. Unmatched-alias rate is monitored (6.6). |
 | **Laptop resources:** the full stack might not fit in 4 GB in Lab 4. | Small linear model. Airflow LocalExecutor. Lab 3 LLM via a hosted API rather than local vLLM if memory is short. |
+| **The LLM provider changes the model behind the same name** (Lab 3). | Every run logs the model id and prompt hashes; the fixed test set (job A) and the 40-question set (job B) are rerun, and a metric shift with unchanged hashes points at the provider. Lab 4 schedules the rerun. |
 | **The emulated label delay hides real dynamics** (real delays vary). | The delay is a parameter of the label release job. Lab 4 can test 7 and 30 days as well. |
 
 ## 7 Appendix
@@ -521,7 +597,9 @@ The total is above the $800 ceiling in section 4. The first lever is the vector 
 |---|---|---|---|
 | **Feast online feature store** for company-level aggregates (for example a company's product mix over the last 90 days) | Real online/offline split, a richer signal, uses the reference stack | Needs a materialization job and an online store in a 4 GB cluster. The narrative already carries most of the signal. | **Built, not used by the model.** Lab 2 defines `company_monthly_stats` and proves the point-in-time join (`make feast-demo`); whether the model uses it is decided by error analysis, not yet done. |
 | **Fine-tuned transformer** (for example DistilBERT) instead of TF-IDF + LR | Likely +3–8 pp macro-F1 and more robust to paraphrase | GPU or slow CPU training, more than 250 MB model, harder to meet 300 ms p95 on 1 CPU, slower retrain loop | **Rejected for v1.** It is the obvious challenger once the pipeline exists. |
-| **Zero-shot LLM as the primary classifier** | No training. Handles a new product by editing the prompt. | Per-call cost at 15,000–21,000 complaints a day, latency in seconds, non-deterministic, hard to version against a label set | **Rejected as router.** Evaluated in Lab 3 as the LLM baseline on a fixed sample of the test set, and used as a rationale assistant. |
+| **Zero-shot LLM as the primary classifier** | No training. Handles a new product by editing the prompt. | Per-call cost at 15,000–21,000 complaints a day, latency in seconds, non-deterministic, hard to version against a label set | **Rejected as router, now with numbers (7.2):** macro-F1 0.601 against 0.633 on the same test set, p50 0.78 s against a 300 ms budget, $0.46 per 5,212 complaints. Better than the model on four classes, so a candidate second opinion for the manual queue. |
+| **Self-hosted LLM (vLLM 0.30.0, CPU image built locally, 0.5–1.5 B model)** instead of an API (Lab 3) | No per-token cost, data stays on the machine, weights pinned, the course reference | About 7 GB of container memory on a laptop already at its swap limit; 1–2 s for a short prompt from a model much weaker than the one compared; a GPU for anything larger (~$730/month for one always-on A10G) | **Rejected** for Lab 3: hosted API (6.3). The code is OpenAI-compatible, so a vLLM server is a config change. |
+| **Dedicated vector database (Qdrant)** instead of pgvector (Lab 3) | Built for vector search: HNSW tuning, payload filters, scales to millions of vectors | One more service and volume to run and back up; 2,895 vectors do not need it; pgvector shares transactions and backups with the warehouse | **Rejected.** pgvector in the existing Postgres. |
 | **Kafka streaming ingestion** | Matches a real intake stream | The source is a daily batch export, so streaming adds infra with no freshness gain | **Rejected.** Serving is already online. Ingestion stays batch. |
 | **Different dataset:** HuffPost News Category for news classification | Clean, small, text-native | Ends in 2022, no label delay story, no natural owner/consumer | **Rejected** in favor of CFPB. |
 
@@ -564,6 +642,39 @@ At the validation-chosen threshold 0.68, 85.8% of test complaints are auto-route
 
 **Lineage check.** `make reproduce` retrained v4 from its tags in a clean worktree: 0.6325 registered, 0.6325 reproduced (tolerance 0.005).
 
+**Lab 3: LLM baseline** (job A, same 5,212 test complaints, MLflow experiment `complaint-router`):
+
+| Run | Prompt hash | Test macro-F1 | Test accuracy | Tokens in / out | Cost | p50 / p95 |
+|---|---|---:|---:|---:|---:|---:|
+| Keyword rule (Lab 2) | — | 0.380 | 0.714 | — | — | — |
+| `llm-zero-shot`, class names | `88711daaddb5` | 0.587 | 0.879 | 2,540,268 / 42,756 | $0.275 | 0.78 / 1.23 s |
+| `llm-zero-shot-v2`, plus definitions | `cd3105724a2f` | 0.601 | 0.880 | 4,395,740 / 42,850 | $0.461 | 0.78 / 1.06 s |
+| TF-IDF soft vote v4 `@champion` (Lab 2) | — | **0.633** | **0.895** | — | 0 | ms |
+
+Per class (test F1, v2 vs the Lab 2 model): Credit reporting 0.94 / 0.95 · Debt collection 0.57 / 0.63 · Mortgage 0.81 / 0.84 · Checking or savings 0.76 / 0.74 · Credit or prepaid card 0.64 / 0.63 · Money transfer and virtual currency 0.79 / 0.71 · Student loan 0.56 / 0.65 · Vehicle loan or lease 0.74 / 0.72 · Payday, title and personal loan 0.62 / 0.46 · Debt or credit management 0.17 / 0.00. The definitions raised macro-F1 by 0.014 for 1.7× the input tokens. The trained model stays the router; the LLM is stronger exactly on the small classes the model misses, which makes it a candidate second opinion for the manual queue (Lab 5).
+
+**Lab 3: retrieval and answers** (job B, 40 questions, MLflow experiment `complaint-router-rag`; judge pass = score 4 or 5; `judge_control_pass_rate` 0.00 and `citation_valid_rate` 1.00 on every run):
+
+| Varied | Value | Hit@1 | Hit@5 | MRR@10 | Judge mean | Judge pass | Cost (40 q) |
+|---|---|---:|---:|---:|---:|---:|---:|
+| chunk size (MiniLM-L6) | 400 | 0.350 | 0.525 | 0.428 | 2.80 | 0.400 | $0.0061 |
+| | 800 | 0.325 | 0.500 | 0.400 | 2.93 | 0.425 | $0.0077 |
+| | 1600 | 0.275 | 0.575 | 0.399 | 3.28 | 0.500 | $0.0125 |
+| embedding (chunk 800) | all-MiniLM-L6-v2 | 0.325 | 0.500 | 0.400 | 2.93 | 0.425 | $0.0077 |
+| | multi-qa-MiniLM-L6-cos-v1 | 0.275 | 0.475 | 0.367 | 2.85 | 0.375 | $0.0077 |
+| | bge-small-en-v1.5 | 0.400 | 0.500 | 0.448 | 2.80 | 0.400 | $0.0078 |
+| | **all-mpnet-base-v2** | **0.475** | **0.725** | **0.573** | 3.60 | 0.650 | $0.0082 |
+| top-k (mpnet, chunk 800) | 1 | | | | 3.15 | 0.525 | $0.0036 |
+| | 3 | | | | 3.60 | 0.625 | $0.0060 |
+| | **5 (configured)** | 0.475 | 0.725 | 0.573 | 3.75 | 0.675 | $0.0080 |
+| | 10 | | | | 4.05 | 0.750 | $0.0132 |
+
+**Reading.** The embedding model was the bottleneck, not chunking: chunk size moved hit@5 by at most 3 questions, the embedding model by 9. Smaller chunks rank better at the top (hit@1, MRR), larger ones answer better because more of the section reaches the prompt. More context (top-k) answers more questions at proportionally more input tokens. The same configuration run twice gave judge pass 0.650 and 0.675, so one question is the noise floor of this set. Eleven questions still miss at k = 5, mostly narrow clauses inside long definition sections; when retrieval misses, the model refuses (7 of 40 at k = 5) instead of citing what it was not given.
+
+**Judge check.** Control (answers judged against another question's reference): 0 of 40 pass on every run. Hand grading of 12 answers of the final run with the same rubric: pass/fail agrees on 12 of 12, the exact score on 10 of 12. A known failure mode seen once: a correct-sounding answer citing the wrong regulation scored 5, because the rubric grades facts; `citation_valid_rate` and the retrieval metrics cover sources.
+
+**Reasoning tokens.** The first smoke run (`smoke`, kept) used the model's default reasoning: 20 of 40 answers came back empty because reasoning used up `max_tokens`, output tokens were 2.7× higher and p50 latency doubled. Reasoning is now off in the config, and every run logs `llm_tokens_reasoning` (0 since) and `llm_empty_replies`.
+
 ### 7.3 Serving and monitoring results
 
 *Placeholder. Lab 4 fills this in: load test, real deployment topology, drift injection result and the alert received.*
@@ -572,7 +683,7 @@ At the validation-chosen threshold 0.68, 85.8% of test complaints are auto-route
 
 | Lab | What it adds to this system |
 |---|---|
-| 2 | **Done.** Airflow DAG `ccdb_pipeline` ingests the DVC-versioned sample month by month with two quality gates; both rule baselines and the TF-IDF + LR model are tracked in MLflow, and v2 is registered as `@champion` with data version and commit (7.2). |
-| 3 | A zero-shot LLM classifier is scored against the TF-IDF model on a fixed 1,000-complaint test sample (the LLM baseline), and a rationale component retrieves Ask CFPB and eCFR passages from pgvector to explain manual-queue routings, with versioned prompts and logged token cost and p50/p95 latency. |
+| 2 | **Done.** Airflow DAG `ccdb_pipeline` ingests the DVC-versioned sample month by month with two quality gates; both rule baselines and the TF-IDF soft-vote model are tracked in MLflow, and v4 is registered as `@champion` with data version and commit (7.2). |
+| 3 | **Done.** A zero-shot LLM classifier is scored against the TF-IDF model on the full 5,212-complaint test set (0.601 vs 0.633 macro-F1), and a retrieval component answers agents' questions from eCFR regulation passages in pgvector, with versioned config and prompts, a 40-question evaluation set, three one-parameter sweeps and logged token cost and p50/p95 latency (7.2). |
 | 4 | `complaint-router-api` is containerized and deployed on Minikube with health probes, a nightly Evidently job and Prometheus/Grafana, and an injected drift (replaying a post-taxonomy-change month) reaches the ML on-call alert. |
 | 5 | An agent runs the operations playbook: reads drift reports, compares `@challenger` with `@champion` against the 5.4 rule and drafts a promotion note for the human approver, with traces and a ten-task evaluation. |
