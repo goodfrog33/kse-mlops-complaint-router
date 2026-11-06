@@ -1,0 +1,47 @@
+# Every setting of the LLM component (design.md 5.3). Code reads this file and nothing else:
+# change a value here, rerun, and the run in MLflow records the new value and this file's hash.
+
+llm:
+  # Any OpenAI-compatible server: OpenRouter here, or `vllm serve <model>` on a GPU machine.
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY   # the key itself lives in .env, never in the repository
+  model: anthropic/claude-haiku-5.5
+  temperature: 0.0
+  reasoning: false                  # Haiku 5.5 reasons by default; billed, and it ate max_tokens
+  timeout_s: 60
+  concurrency: 8                    # parallel requests during evaluation runs
+
+classify:                           # the LLM baseline: same task, same test set as Lab 2
+  prompt: prompts/classify.md
+  max_tokens: 20
+  max_input_chars: 4000             # longer narratives are cut; 99% of test narratives fit
+
+corpus:
+  source: eCFR, title 12, regulation text only (no appendices, no official interpretations)
+  date: "2026-10-01"                # point-in-time snapshot of the regulations
+  parts: ["1002", "1005", "1006", "1022", "1024", "1026"]
+  dir: data/corpus/ecfr
+
+index:                              # ingestion: corpus -> chunks -> embeddings -> pgvector
+  chunk_size: 800                   # characters
+  chunk_overlap: 100
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  query_prefix: ""                  # some models (bge) expect an instruction before the query
+
+retrieve:
+  top_k: 5
+
+answer:
+  prompt: prompts/rag_answer.md
+  max_tokens: 400
+
+judge:
+  # A different model family from the answering model, so it does not grade its own style.
+  model: openai/gpt-4.1-mini
+  prompt: prompts/judge.md
+  max_tokens: 200
+
+eval_set:
+  path: data/eval/rag_questions.jsonl
+  generator_model: google/gemini-2.5-flash   # a third family wrote the questions
+  generator_prompt: prompts/make_questions.md

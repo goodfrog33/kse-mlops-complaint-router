@@ -14,3 +14,7 @@ data/*
 data/raw/*
 !data/raw/ccdb_sample.dvc
 feature_repo/data/
+!data/corpus/
+data/corpus/*
+!data/corpus/ecfr.dvc
+!data/eval/

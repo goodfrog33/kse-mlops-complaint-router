@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: complaints
           POSTGRES_PASSWORD: complaints
@@ -32,3 +32,28 @@ jobs:
       - run: make setup
       - run: make data-public
       - run: make test-integration
+
+  retrieval:
+    # A third party rebuilds the vector index from the public corpus with one command and
+    # scores retrieval on the question set. No LLM key needed; the run goes to a local store.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: complaints
+          POSTGRES_PASSWORD: complaints
+          POSTGRES_DB: warehouse
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U complaints" --health-interval 5s --health-retries 20
+    env:
+      WAREHOUSE_DSN: postgresql://complaints:complaints@localhost:5432/warehouse
+      MLFLOW_TRACKING_URI: file:./mlruns
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: make setup
+      - run: make corpus-public
+      - run: make rag-index
+      - run: uv run --group rag python -m complaint_router.rag_eval --retrieval-only

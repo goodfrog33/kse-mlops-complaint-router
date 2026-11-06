@@ -80,4 +80,29 @@ backtest:              ## rolling-origin backtest, 3 monthly folds, logged to ML
 reproduce:             ## retrain the champion from its commit and data version
 	uv run python scripts/reproduce.py --alias champion
 
+# --- LLM component (Lab 3) ---------------------------------------------------
+RAG = uv run --group rag python -m complaint_router
+
+corpus:                ## pull the regulation corpus from the MinIO remote
+	uv run dvc pull data/corpus/ecfr.dvc
+
+corpus-public:         ## pull the regulation corpus from the public mirror, no credentials
+	uv run dvc pull -r public data/corpus/ecfr.dvc
+
+corpus-fetch:          ## re-download the eCFR snapshot named in configs/llm.yaml, then dvc add
+	uv run python -m complaint_router.rag fetch
+
+rag-index:             ## rebuild the pgvector index from the corpus; prints the document count
+	$(RAG).rag index
+
+llm-baseline:          ## the Lab 2 task done zero-shot by the LLM, logged next to the Lab 2 runs
+	uv run python -m complaint_router.llm_baseline
+
+rag-eval:              ## retrieval + answers + judge on the question set: one MLflow run
+	$(RAG).rag_eval --judge-control $(if $(SET),--set $(SET))
+
+rag-sweep:             ## one parameter, three values: make rag-sweep PARAM=index.chunk_size VALUES="400 800 1600"
+	for v in $(VALUES); do $(RAG).rag_eval --judge-control --set $(PARAM)=$$v || exit 1; done
+
 .PHONY: setup lint test test-integration env up down dvc-creds data data-public data-seed backfill run-month wait counts feast-demo train backtest reproduce
+.PHONY: corpus corpus-public corpus-fetch rag-index llm-baseline rag-eval rag-sweep
