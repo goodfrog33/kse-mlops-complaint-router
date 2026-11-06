@@ -203,6 +203,8 @@ corpus 778db57b397bda283bdd9020aab52ebf  chunk_size=800 overlap=100  model=sente
 documents: 195  chunks: 2895  index_version: 852a5450ef92  embedding: 188.9 s
 ```
 
+**Rebuilt by a third party.** The CI job `retrieval` pulls the corpus from the public remote on a fresh GitHub runner, runs `make rag-index` and scores retrieval: same `index_version` `852a5450ef92`, same 195 documents and 2,895 chunks, same hit@1 / @5 / @10 of 0.475 / 0.725 / 0.800 and MRR 0.573 as on the laptop (run of commit `7074094`; embedding took 676 s on the 4-CPU runner).
+
 The index lives in Postgres (`pgvector/pgvector:pg16`, the same Postgres 16 as before plus the extension), table `rag.chunks`, keyed by `index_version` = hash of (corpus version, chunk size, overlap, embedding model). A rebuild replaces that version in one transaction; `rag.index_builds` records what was built and when. Search is exact cosine distance (no approximate index: 2,895 rows take 50 ms per query including the embedding).
 
 ### LLM baseline against the Lab 2 model
