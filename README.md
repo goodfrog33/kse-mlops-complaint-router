@@ -11,6 +11,7 @@ A complaint intake desk receives fifteen to twenty thousand free-text consumer c
 | Design document | [`docs/design.md`](docs/design.md) (Lab 3 revised 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.7, 6.8, 7.1, 7.2) |
 | Presentation (Lab 1) | [`docs/presentation/complaint-router-lab1.pptx`](docs/presentation/complaint-router-lab1.pptx) ([PDF](docs/presentation/complaint-router-lab1.pdf)) |
 | Presentation (Lab 2) | [`docs/presentation/complaint-router-lab2.pptx`](docs/presentation/complaint-router-lab2.pptx) ([PDF](docs/presentation/complaint-router-lab2.pdf)) |
+| Presentation (Lab 3) | [`docs/presentation/complaint-router-lab3.pptx`](docs/presentation/complaint-router-lab3.pptx) ([PDF](docs/presentation/complaint-router-lab3.pdf)) |
 | Data profile | [`docs/data-profile.md`](docs/data-profile.md) |
 | Label map | [`configs/taxonomy_map.csv`](configs/taxonomy_map.csv): 20 CFPB product names → 10 classes |
 | Lab 2 defense notes (Ukrainian) | [`docs/defense/lab2-qa.md`](docs/defense/lab2-qa.md): the 20 questions of Appendix 2, answered from this repository |
