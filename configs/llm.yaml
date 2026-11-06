@@ -25,7 +25,8 @@ corpus:
 index:                              # ingestion: corpus -> chunks -> embeddings -> pgvector
   chunk_size: 800                   # characters
   chunk_overlap: 100
-  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  # Chosen by the embedding sweep (README, design.md 7.2): hit rate at 5 0.50 -> 0.725.
+  embedding_model: sentence-transformers/all-mpnet-base-v2
   query_prefix: ""                  # some models (bge) expect an instruction before the query
 
 retrieve:

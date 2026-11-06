@@ -49,7 +49,7 @@ jobs:
           --health-cmd "pg_isready -U complaints" --health-interval 5s --health-retries 20
     env:
       WAREHOUSE_DSN: postgresql://complaints:complaints@localhost:5432/warehouse
-      MLFLOW_TRACKING_URI: file:./mlruns
+      MLFLOW_TRACKING_URI: sqlite:///mlflow.db
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
