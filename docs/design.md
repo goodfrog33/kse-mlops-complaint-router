@@ -540,7 +540,7 @@ Alerts go out as Grafana alert e-mails. **Assumption:** a single recipient, the 
 
 ### 6.7 Cost
 
-An estimate of the AWS column for one month in `us-east-1`. Nothing here is run. Prices are list-price **assumptions** to be checked against the [AWS pricing calculator](https://calculator.aws/) and revised in Lab 3/4.
+An estimate of the AWS column for one month in `us-east-1`. The cloud infrastructure is not run: its prices are list-price **assumptions** to be checked against the [AWS pricing calculator](https://calculator.aws/) and revised in Lab 4. The LLM row is the exception: it is computed from tokens and cost **measured** in the Lab 3 runs (below).
 
 | Service | Sizing assumption | ≈ USD / month |
 |---|---|---|
